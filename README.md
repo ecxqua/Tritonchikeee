@@ -11,7 +11,7 @@
 7. Подтяните все зависимости из requirements.txt.
 8. Запустите проект в режиме python-модуля:
 ```
-python -m bot/app
+python -m bot.app
 ```
 
 ## Сборка и запуск через Docker
