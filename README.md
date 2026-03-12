@@ -1,13 +1,19 @@
 # ReID_newts
 
-Веса обученных моделей по ссылке - https://drive.google.com/drive/folders/1UsnulLQ6BuiWZvuEO2ozhSZSGt78Hc8a
+`ReID_newts` — это Telegram-бот для реидентификации тритонов по фото брюшка.
 
-## Настройка бота
+## Запуск telegram-бота
+1. Зарегистрируйте бота в BotsFather.
+2.  Создайте файл `.env` в корневой директории. Добавьте в него ваш токен бота: TOKEN=YOUR_TOKEN
+3. Скайчате веса обученных моделей и модели: https://drive.google.com/drive/folders/1UsnulLQ6BuiWZvuEO2ozhSZSGt78Hc8a
+4. Переместите скачанные файлы в директорию `bot/models`.
+5. Создайте пустые папки `bot/conservation` и `bot/results`.
+7. Подтяните все зависимости из requirements.txt.
+8. Запустите проект в режиме python-модуля:
+```
+python -m bot.app
+```
 
-1. Создайте файл `.env` в корневой директории
-2. Добавьте в него ваш токен бота: TOKEN=YOUR_TOKEN
-3. Переместите скачанные модели в директорию bot/models
-4. Создать в папки conservation и results в bot/ (bot/conservation и bot/results)
 ## Сборка и запуск через Docker
 ### Сборка образа
 ```bash

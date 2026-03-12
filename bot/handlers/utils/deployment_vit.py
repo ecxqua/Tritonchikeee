@@ -111,7 +111,7 @@ def load_model(model_path, device):
 
 def get_embedding(image_path, model, transform, device):
     """
-    получение эмбедингов
+    Использует модель для генерации эмбеддинга изображения.
     """
     try:
         image = Image.open(image_path).convert('RGB')
