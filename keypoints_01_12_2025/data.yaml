@@ -1,0 +1,23 @@
+# Путь к данным
+path: C:/klasss/archive/OneOME_newts-main/keypoints_01_12_2025  # корневая папка датасета
+
+train: train/images     # относительный путь от path
+val: val/images         # относительный путь от path
+
+
+# Количество классов
+nc: 1
+
+# Имена классов
+names:
+  0: lizard
+
+# Описание ключевых точек
+# kpt_shape: [num_keypoints, num_dims]
+# num_dims = 3, т.к. (x, y, v), где v ∈ {0,1,2}
+kpt_shape: [2, 3]
+
+# Имена ключевых точек по порядку
+keypoints:
+  0: between_front_legs   # точка между передними лапами (ближе к голове)
+  1: between_back_legs    # точка между задними лапами (ближе к хвосту)
