@@ -6,16 +6,16 @@ from scipy.ndimage import map_coordinates, gaussian_filter1d
 
 
 class TritonMaskUnwrapper:
-    def __init__(self, seg_model_path="bot/models/best_seg.pt"):
+    def __init__(self, seg_model_path="yolo11s_seg_23_12/weights/best.pt"):
         """
         Инициализация модели сегментации для развертки брюшка тритона
         """
         self.seg_model = YOLO(seg_model_path)
 
-        # Параметры для настройки
-        self.TRIM_TOP_PCT = 0.3  # 30% сверху
+        # Параметры для настройки (должны совпадать с deployment_scripts/deployment_yolo.py)
+        self.TRIM_TOP_PCT = 0.3   # 30% сверху
         self.TRIM_BOTTOM_PCT = 0.15  # 15% снизу
-        self.FINAL_SIZE = 224  # Итоговый размер
+        self.FINAL_SIZE = 244  # Должен совпадать с тем, чем готовился датасет
 
     def extract_smooth_centerline(self, mask, step=2, sigma_x=3):
         """
@@ -239,7 +239,7 @@ async def process_single_image(img_path, output_dir):
             return False
 
         # Создание unwrapper
-        unwrapper = TritonMaskUnwrapper(seg_model_path="bot/models/best_seg.pt")
+        unwrapper = TritonMaskUnwrapper(seg_model_path="yolo11s_seg_23_12/weights/best.pt")
 
         # Получение маски
         mask = unwrapper.get_segmentation_mask(image, img_path)

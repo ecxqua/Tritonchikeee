@@ -7,7 +7,7 @@
 1. Создайте файл `.env` в корневой директории
 2. Добавьте в него ваш токен бота: TOKEN=YOUR_TOKEN
 3. Переместите скачанные модели в директорию bot/models
-
+4. Создать в папки conservation и results в bot/ (bot/conservation и bot/results)
 ## Сборка и запуск через Docker
 ### Сборка образа
 ```bash

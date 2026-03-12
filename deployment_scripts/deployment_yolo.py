@@ -15,7 +15,7 @@ INPUT_ROOT = r"C:/klasss/archive/seg/2"              # исходные фото
 SEND_PHOTO_DIR = os.path.join(ROOT_DIR, "send_photo")  # конечный вывод (unwrap)
 
 # Модель сегментации
-SEG_MODEL_PATH = r"C:/klasss/archive/seg/yolo11s_seg_newts_exp1/weights/best.pt"
+SEG_MODEL_PATH = r"yolo11s_seg_23_12/weights/best.pt"
 
 # Сколько процентов центрлайна отрезать сверху/снизу ПОСЛЕ ресэмплинга
 TRIM_TOP_PCT = 0.3     # 30 % наверху
