@@ -1,0 +1,44 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.so
+
+# Virtual environments and local Python state
+.Python
+.env
+*.env
+env/
+venv/
+.venv/
+pip-log.txt
+
+# IDE/editor
+.idea/
+.vscode/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Local ML/runtime artifacts
+bot/results/*.jpg
+bot/results/*.jpeg
+bot/results/*.png
+bot/results/*.csv
+bot/results/*.txt
+bot/conservation/*.jpg
+bot/conservation/*.jpeg
+bot/conservation/*.png
+data/dataset_crop/database_embeddings.pkl
+models/
+data/input/
+data/output/
+
+# Training outputs and checkpoints
+keypoints_01_12_2025/
+yolo11s_seg_23_12/
+yolo11s_seg_last/
+
+# Optional local docs/attachments
+*.pdf
