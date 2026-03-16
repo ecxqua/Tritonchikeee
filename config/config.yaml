@@ -1,0 +1,24 @@
+io:
+  input_folder: "data/input/" # Папка для входных фото
+  output_folder: "data/output" # Папка для результатов и артефактов
+
+# Конфигурация модели сегментации.
+seg-model:
+  path: "models/best_seg.pt"
+  trim_top_pct: 0.3
+  trim_bottom_pct: 0.15
+  final_size: 244
+  debug: False
+
+# Конфигурация модели идентификации.
+id-model:
+  path: "models/best_model.pth"
+  embedding_dim: 512  # Неактивно
+  droupout_rate: 0.4  # Неактивно
+
+# Конфигурация базы данных.
+db:
+  path: "data/dataset_crop/dataset_crop_24"
+
+view:
+  size_answer: 5  # Размер рейтинга
