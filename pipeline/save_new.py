@@ -3,258 +3,310 @@ from pathlib import Path
 from datetime import datetime
 import sqlite3
 
-# Добавляем корень проекта в путь
 sys.path.append(str(Path(__file__).parent.parent))
-
 from database.card_database import DB_PATH, init_database
 
 # === КОНФИГУРАЦИЯ ОБЯЗАТЕЛЬНЫХ ПОЛЕЙ ===
-# Определяем, какие поля обязательны для каждого шаблона согласно ТЗ
 REQUIRED_FIELDS = {
-    "ИК-1": ["length_body", "weight", "sex"],  # + date, notes (общие)
+    "ИК-1": ["length_body", "weight", "sex"],
     "ИК-2": ["parent_male_id", "parent_female_id", "water_body_name", "release_date"],
     "КВ-1": ["status", "water_body_number", "length_body", "length_tail"],
     "КВ-2": ["status", "water_body_name"]
 }
 
+
+def _get_next_photo_number(cursor, individual_id: str) -> str:
+    """
+    Автоматически генерирует порядковый номер фото (01, 02, 03...)
+    """
+    base_id = individual_id.replace("NT-", "")
+    cursor.execute(
+        "SELECT COUNT(*) FROM photos WHERE individual_id LIKE ?",
+        (f"NT-{base_id}%",)
+    )
+    count = cursor.fetchone()[0]
+    return f"{count + 1:02d}"
+
+
 def save_new_individual(
-    embedding,                    # numpy-вектор от ViT (обязательно)
-    photo_path: str,              # путь к оригинальному фото
-    species: str = "Карелина",    # "Карелина" или "Гребенчатый"
+    embedding,
+    photo_path_full: str = None,      # ← Теперь может быть None (для legacy)
+    photo_path_cropped: str = None,
+    species: str = "Карелина",
     project_name: str = "Основной",
-    template_type: str = "ИК-1",  # ИК-1, ИК-2, КВ-1, КВ-2
-    individual_id: str = None,    # Если None, генерируется автоматически
-    **card_data                   # Все остальные поля карточки
+    template_type: str = "ИК-1",
+    individual_id: str = None,
+    photo_number: str = None,
+    is_legacy: bool = False,          # ← Флаг для старых данных
+    **card_data
 ):
     """
-    Сохраняет новую особь в базу (карточка + эмбеддинг)
-    
-    Поддерживает 4 шаблона: ИК-1, ИК-2, КВ-1, КВ-2
+    Сохраняет новую особь в базу (карточка + все фотографии)
     """
-    # 1. Инициализация БД
     init_database() 
-    
-    # 2. Валидация обязательных полей для выбранного шаблона
     _validate_template_fields(template_type, card_data)
     
-    # 3. Генерация ID, если не передан
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
     if individual_id is None:
         individual_id = f"NT-{datetime.now().strftime('%y%m%d%H%M%S')}"
     
-    # 4. Подключение и запись
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-
-    cursor.execute('''
-        INSERT INTO individuals (
-            -- Служебные поля
-            individual_id, template_type, species, project_name, photo_path,
-            photo_number, embedding_index, created_at,
-            
-            -- Общие поля
-            date, notes,
-            
-            -- Биометрия
-            length_body, length_tail, length_total, weight, sex,
-            
-            -- Рождение и происхождение (ИК-1)
-            birth_year_exact, birth_year_approx, origin_region,
-            length_device, weight_device,
-            
-            -- Родители (ИК-2)
-            parent_male_id, parent_female_id, release_date, water_body_name,
-            
-            -- Встреча (КВ-1, КВ-2)
-            meeting_time, status, water_body_number
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ''', (
-        # Служебные
-        individual_id,
-        template_type,
-        species,
-        project_name,
-        photo_path,
-        card_data.get('photo_number'),
-        -1,  # embedding_index (FAISS добавим позже)
-        datetime.now().isoformat(),
-        
-        # Общие
-        card_data.get('date', datetime.now().strftime("%d.%m.%Y")),
-        card_data.get('notes'),
-        
-        # Биометрия
-        card_data.get('length_body'),
-        card_data.get('length_tail'),
-        card_data.get('length_total'),
-        card_data.get('weight'),
-        card_data.get('sex'),
-        
-        # Рождение и происхождение
-        card_data.get('birth_year_exact'),
-        card_data.get('birth_year_approx'),
-        card_data.get('origin_region'),
-        card_data.get('length_device'),
-        card_data.get('weight_device'),
-        
-        # Родители
-        card_data.get('parent_male_id'),
-        card_data.get('parent_female_id'),
-        card_data.get('release_date'),
-        card_data.get('water_body_name'),
-        
-        # Встреча
-        card_data.get('meeting_time'),
-        card_data.get('status'),
-        card_data.get('water_body_number')
-    ))
+    if photo_number is None:
+        photo_number = _get_next_photo_number(cursor, individual_id)
     
-    conn.commit()
-    conn.close()
-
-    print(f"✅ Новая особь успешно сохранена!")
-    print(f"   ID: {individual_id}")
-    print(f"   Шаблон: {template_type}")
-    print(f"   Вид: {species}")
-    return individual_id
+    try:
+        # === 1. ТАБЛИЦА individuals (Карточка) ===
+        # Для legacy без полного фото используем кроп в поле photo_path
+        main_photo_ref = photo_path_full if photo_path_full else photo_path_cropped
+        
+        cursor.execute('''
+            INSERT INTO individuals (
+                individual_id, template_type, species, project_name,
+                photo_path, photo_number, embedding_index, created_at,
+                date, notes,
+                length_body, length_tail, length_total, weight, sex,
+                birth_year_exact, birth_year_approx, origin_region,
+                length_device, weight_device,
+                parent_male_id, parent_female_id, release_date, water_body_name,
+                meeting_time, status, water_body_number
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (
+            individual_id, template_type, species, project_name,
+            main_photo_ref, photo_number, -1, datetime.now().isoformat(),
+            card_data.get('date', datetime.now().strftime("%d.%m.%Y")),
+            card_data.get('notes'),
+            card_data.get('length_body'), card_data.get('length_tail'),
+            card_data.get('length_total'), card_data.get('weight'),
+            card_data.get('sex'), card_data.get('birth_year_exact'),
+            card_data.get('birth_year_approx'), card_data.get('origin_region'),
+            card_data.get('length_device'), card_data.get('weight_device'),
+            card_data.get('parent_male_id'), card_data.get('parent_female_id'),
+            card_data.get('release_date'), card_data.get('water_body_name'),
+            card_data.get('meeting_time'), card_data.get('status'),
+            card_data.get('water_body_number')
+        ))
+        
+        # === 2. ТАБЛИЦА photos (Полное фото) ===
+        # Сохраняем ТОЛЬКО если есть полное фото (не legacy)
+        if photo_path_full and not is_legacy:
+            cursor.execute('''
+                INSERT INTO photos (
+                    individual_id, photo_type, photo_number, photo_path,
+                    date_taken, time_taken, is_main, is_processed, embedding_index, is_legacy
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                individual_id, 'full', photo_number, photo_path_full,
+                card_data.get('date', datetime.now().strftime("%d.%m.%Y")),
+                card_data.get('meeting_time'), 1, 0, None, 0  # is_legacy=0
+            ))
+        
+        # === 3. ТАБЛИЦА photos (Кроп брюшка) ===
+        # Сохраняем всегда, если кроп есть (нужен для ViT)
+        if photo_path_cropped:
+            cursor.execute('''
+                INSERT INTO photos (
+                    individual_id, photo_type, photo_number, photo_path,
+                    date_taken, time_taken, is_main, is_processed, embedding_index, is_legacy
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                individual_id, 'cropped', photo_number, photo_path_cropped,
+                card_data.get('date', datetime.now().strftime("%d.%m.%Y")),
+                card_data.get('meeting_time'), 
+                1 if not photo_path_full else 0,  # is_main=1 если нет полного
+                1, -1, 1 if is_legacy else 0      # is_legacy=1 если флаг установлен
+            ))
+        
+        conn.commit()
+        
+        # === 4. Обновление embedding_index (FAISS) ===
+        if embedding is not None and photo_path_cropped:
+            # Здесь будет вызов FAISS: index.add(embedding)
+            # embedding_idx = index.add(embedding)
+            # cursor.execute("UPDATE photos SET embedding_index = ? WHERE photo_path = ?", 
+            #                (embedding_idx, photo_path_cropped))
+            # conn.commit()
+            pass
+        
+        conn.close()
+        
+        print(f"✅ Особь сохранена: {individual_id} ({template_type})")
+        print(f"   Фото: {photo_number} | Legacy: {is_legacy}")
+        return individual_id
+        
+    except Exception as e:
+        conn.rollback()
+        conn.close()
+        raise e
 
 
 def _validate_template_fields(template_type: str, card_data: dict):
-    """
-    Проверяет наличие обязательных полей для выбранного шаблона
-    """
     required = REQUIRED_FIELDS.get(template_type, [])
     missing = [field for field in required if card_data.get(field) is None]
-    
     if missing:
-        raise ValueError(
-            f"Для шаблона '{template_type}' обязательны поля: {', '.join(missing)}\n"
-            f"Переданные данные: {list(card_data.keys())}"
-        )
+        raise ValueError(f"Для шаблона '{template_type}' обязательны поля: {', '.join(missing)}")
 
 
 def update_individual(individual_id: str, **kwargs):
-    """
-    Обновляет данные существующей особи (требование ТЗ: повторное редактирование)
-    """
+    """Обновляет данные карточки особи"""
     init_database()
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
 
-    # Формируем динамический запрос только для переданных полей
     fields = [f"{key} = ?" for key in kwargs.keys()]
-    values = list(kwargs.values())
-    values.append(individual_id)
+    values = list(kwargs.values()) + [individual_id]
 
     if not fields:
         print("⚠️ Нет полей для обновления")
         return
 
     query = f"UPDATE individuals SET {', '.join(fields)} WHERE individual_id = ?"
-    
     cursor.execute(query, values)
     conn.commit()
     conn.close()
     print(f"✅ Особь {individual_id} обновлена.")
 
 
-# === ТЕСТЫ ФУНКЦИИ ===
+def add_encounter(
+    individual_id: str,
+    template_type: str,          # ← КВ-1 или КВ-2
+    photo_path_full: str = None,
+    photo_path_cropped: str = None,
+    embedding=None,
+    **card_data
+):
+    """
+    Добавляет НОВУЮ ВСТРЕЧУ (КВ-1/КВ-2) для существующей особи.
+    В отличие от add_photo, эта функция создаёт запись в individuals,
+    чтобы сохранить биометрию и статус встречи.
+    """
+    init_database()
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    # Проверка шаблона
+    if template_type not in ["КВ-1", "КВ-2"]:
+        raise ValueError("Для добавления встречи используйте шаблоны КВ-1 или КВ-2")
+    
+    # Валидация полей встречи
+    _validate_template_fields(template_type, card_data)
+    
+    photo_number = _get_next_photo_number(cursor, individual_id)
+    
+    try:
+        # 1. Создаем запись о встрече в individuals
+        main_photo_ref = photo_path_full if photo_path_full else photo_path_cropped
+        
+        cursor.execute('''
+            INSERT INTO individuals (
+                individual_id, template_type, photo_path, photo_number,
+                date, meeting_time, status, water_body_number, water_body_name,
+                length_body, length_tail, length_total, weight, sex, notes,
+                species, project_name, created_at, embedding_index
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (
+            individual_id, template_type, main_photo_ref, photo_number,
+            card_data.get('date', datetime.now().strftime("%d.%m.%Y")),
+            card_data.get('time'), card_data.get('status'),
+            card_data.get('water_body_number'), card_data.get('water_body_name'),
+            card_data.get('length_body'), card_data.get('length_tail'),
+            card_data.get('length_total'), card_data.get('weight'),
+            card_data.get('sex'), card_data.get('notes'),
+            "Карелина", "Основной", datetime.now().isoformat(), -1
+        ))
+        
+        # 2. Сохраняем фото (полное)
+        if photo_path_full:
+            cursor.execute('''
+                INSERT INTO photos (individual_id, photo_type, photo_number, photo_path, date_taken, is_main, is_legacy)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            ''', (individual_id, 'full', photo_number, photo_path_full, card_data.get('date'), 0, 0))
+        
+        # 3. Сохраняем фото (кроп)
+        if photo_path_cropped:
+            cursor.execute('''
+                INSERT INTO photos (individual_id, photo_type, photo_number, photo_path, date_taken, is_processed, is_legacy)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            ''', (individual_id, 'cropped', photo_number, photo_path_cropped, card_data.get('date'), 1, 0))
+        
+        conn.commit()
+        conn.close()
+        print(f"✅ Встреча {template_type} добавлена к особи {individual_id}")
+        return photo_number
+        
+    except Exception as e:
+        conn.rollback()
+        conn.close()
+        raise e
+
+
+def get_individual_photos(individual_id: str):
+    """Получает все фотографии особи"""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    cursor.execute('''
+        SELECT photo_id, photo_type, photo_number, photo_path, 
+               date_taken, is_main, is_legacy
+        FROM photos
+        WHERE individual_id = ?
+        ORDER BY photo_number ASC, photo_type DESC
+    ''', (individual_id,))
+    
+    photos = cursor.fetchall()
+    conn.close()
+    return photos
+
+
+# === ТЕСТЫ ===
 if __name__ == "__main__":
-    print("🧪 Тестируем сохранение новых особей...\n")
+    print("🧪 Тестирование сохранения (исправленная версия)...\n")
     
-    # --- Тест 1: Шаблон ИК-1 (Первичная регистрация) ---
-    print("1️⃣ Тест шаблона ИК-1 (Первичная регистрация)")
+    # Тест 1: Новая особь (ИК-1)
+    print("1️⃣ Тест ИК-1 (Новая особь)")
     try:
         save_new_individual(
             embedding=None,
-            photo_path="data/input/test_ik1.jpg",
+            photo_path_full="data/photos/full/newt_001.jpg",
+            photo_path_cropped="data/crop/newt_001.jpg",
             template_type="ИК-1",
-            length_body=42.5,
-            length_tail=38.0,
-            weight=3.2,
-            sex="М",
-            birth_year_exact="15.03.2022",
-            origin_region="Свердловская обл.",
-            length_device="Mitutoyo",
-            weight_device="Ohaus",
-            notes="Первичный отлов, хвост регенерирует"
+            length_body=42.5, weight=3.2, sex="М",
+            notes="Тестовая особь"
         )
     except Exception as e:
         print(f"❌ Ошибка: {e}")
     
     print("\n" + "="*50 + "\n")
     
-    # --- Тест 2: Шаблон ИК-2 (Выпуск с родителями) ---
-    print("2️⃣ Тест шаблона ИК-2 (Выпуск с родителями)")
+    # Тест 2: Legacy особь (только кроп)
+    print("2️⃣ Тест Legacy (Только кроп из датасета)")
     try:
         save_new_individual(
             embedding=None,
-            photo_path="data/input/test_ik2.jpg",
-            template_type="ИК-2",
-            parent_male_id="NT-24031701",
-            parent_female_id="NT-24031702",
-            release_date="20.06.2024",
-            water_body_name="Пруд №3",
-            length_total=8.5,
-            weight=4.1,
-            notes="Выпуск после зимовки в неволе"
+            photo_path_full=None,  # ← Нет полного фото
+            photo_path_cropped="data/dataset_crop/karelin/47/IMG_001.jpg",
+            template_type="ИК-1",
+            individual_id="NT-47",
+            is_legacy=True,        # ← Флаг установлен
+            length_body=40.0, weight=3.0, sex="Ж"
         )
     except Exception as e:
         print(f"❌ Ошибка: {e}")
     
     print("\n" + "="*50 + "\n")
     
-    # --- Тест 3: Шаблон КВ-1 (Подробная повторная встреча) ---
-    print("3️⃣ Тест шаблона КВ-1 (Повторная встреча)")
+    # Тест 3: Повторная встреча (КВ-1)
+    print("3️⃣ Тест КВ-1 (Повторная встреча)")
     try:
-        save_new_individual(
-            embedding=None,
-            photo_path="data/input/test_kv1.jpg",
-            individual_id="NT-24031701",  # Существующий ID
+        add_encounter(
+            individual_id="NT-47",
             template_type="КВ-1",
-            meeting_time="14:30",
+            photo_path_full="data/photos/full/newt_001_v2.jpg",
+            photo_path_cropped="data/crop/newt_001_v2.jpg",
             status="жив",
             water_body_number="Пруд №3",
             length_body=45.0,
-            length_tail=40.0,
-            weight=3.5,
-            sex="М",
-            notes="Повторная поимка, вырос на 2.5 мм"
+            date="20.06.2024"
         )
     except Exception as e:
         print(f"❌ Ошибка: {e}")
-    
-    print("\n" + "="*50 + "\n")
-    
-    # --- Тест 4: Шаблон КВ-2 (Быстрая встреча) ---
-    print("4️⃣ Тест шаблона КВ-2 (Быстрая встреча)")
-    try:
-        save_new_individual(
-            embedding=None,
-            photo_path="data/input/test_kv2.jpg",
-            individual_id="NT-24031702",
-            template_type="КВ-2",
-            meeting_time="16:45",
-            status="жив",
-            water_body_name="Река Исеть",
-            notes="Замечен на берегу"
-        )
-    except Exception as e:
-        print(f"❌ Ошибка: {e}")
-    
-    print("\n" + "="*50 + "\n")
-    
-    # --- Тест 5: Проверка валидации (должна выдать ошибку) ---
-    print("5️⃣ Тест валидации (попытка сохранить ИК-2 без родителей)")
-    try:
-        save_new_individual(
-            embedding=None,
-            photo_path="data/input/test_fail.jpg",
-            template_type="ИК-2",
-            # parent_male_id и parent_female_id отсутствуют → ошибка
-            water_body_name="Пруд №5",
-            release_date="01.07.2024"
-        )
-    except ValueError as e:
-        print(f"✅ Валидация сработала: {e}")
-    except Exception as e:
-        print(f"❌ Другая ошибка: {e}")

@@ -102,7 +102,7 @@ def save_new_person(embedding, photo_path: str, species: str = "Карелина
         photo_path=photo_path,
         species=species,
         template_type="ИК-1",
-        date=datetime.now().strftime("%d.%m.%Y"),  # Формат из ТЗ
+        date=datetime.now().strftime("%d.%m.%Y"),
         notes="Добавлено через бота",
         **card_data  # Передаём все дополнительные поля
     )
