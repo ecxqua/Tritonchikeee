@@ -2,8 +2,8 @@ from pathlib import Path
 import gdown
 
 def download_models_folder() -> None:
-
-    models_dir = Path("models")
+    bot_dir = Path(__file__).resolve().parents[0]
+    models_dir = bot_dir / "models"
     required_files = [
         models_dir / "best_seg.pt",
         models_dir / "best_model.pth",
