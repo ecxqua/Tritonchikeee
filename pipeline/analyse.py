@@ -1,9 +1,11 @@
+from datetime import datetime
 import torch
 import yaml
 import asyncio
 from torchvision import transforms
 from .deployment_yolo import process_single_image
 from .deployment_vit import find_similar_images
+from pipeline.save_new import save_new_individual
 
 
 # Загрузка конфигураций
@@ -13,7 +15,9 @@ def load_config(config_path="config/config.yaml"):
         with open(config_path, "r", encoding="UTF-8") as f:
             return yaml.safe_load(f)
     except FileNotFoundError:
-        raise FileNotFoundError("Добавьте файл конфигурации для анализа: config/config.yaml")
+        raise FileNotFoundError(
+            "Добавьте файл конфигурации для анализа: config/config.yaml"
+        )
 
 
 async def photo_processing(config, filepath):
@@ -33,7 +37,7 @@ async def photo_processing(config, filepath):
             config["seg-model"]["trim_top_pct"],
             config["seg-model"]["trim_bottom_pct"],
             config["seg-model"]["final_size"],
-            config["seg-model"]["path"]
+            config["seg-model"]["path"],
         )
 
         # Если YOLO успешно обработал изображение, переходим к поиску похожих
@@ -55,16 +59,18 @@ async def photo_processing(config, filepath):
             # Размер ответа для топ-5 (legacy тг-бота)
             SIZE_ANSWER = config["view"]["size_answer"]
 
-            DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+            DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
             # Трансформации для предобработки изображений
-            TRANSFORMS = transforms.Compose([
-                transforms.Resize((224,224)),
-                transforms.ToTensor(),
-                transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                                     std=[0.229, 0.224, 0.225]),
-
-            ])
+            TRANSFORMS = transforms.Compose(
+                [
+                    transforms.Resize((224, 224)),
+                    transforms.ToTensor(),
+                    transforms.Normalize(
+                        mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]
+                    ),
+                ]
+            )
 
             # Вызываем функцию поиска похожих изображений
             find_similar_images(
@@ -74,7 +80,7 @@ async def photo_processing(config, filepath):
                 output_dir=OUTPUT_DIR,  # Куда сохранять результаты
                 transform=TRANSFORMS,
                 device=DEVICE,
-                size_answer=SIZE_ANSWER
+                size_answer=SIZE_ANSWER,
             )
             return True
 
@@ -85,6 +91,21 @@ async def photo_processing(config, filepath):
         print(f"Ошибка при обработке: {str(e)}")
 
         return False
+
+
+def save_new_person(embedding, photo_path: str, species: str = "Карелина"):
+    """
+    Вызывается, когда бот хочет сохранить новую особь
+    """
+    individual_id = save_new_individual(
+        embedding=embedding,
+        photo_path=photo_path,
+        species=species,
+        template_type="ИК-1",
+        date=datetime.now().strftime("%Y-%m-%d"),
+        notes="Добавлено через бота",
+    )
+    return individual_id
 
 
 if __name__ == "__main__":
