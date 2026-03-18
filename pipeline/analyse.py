@@ -5,7 +5,7 @@ import asyncio
 from torchvision import transforms
 from .deployment_yolo import process_single_image
 from .deployment_vit import find_similar_images
-from pipeline.save_new import save_new_individual
+from .save_new import save_new_individual
 
 
 # Загрузка конфигураций
@@ -93,7 +93,7 @@ async def photo_processing(config, filepath):
         return False
 
 
-def save_new_person(embedding, photo_path: str, species: str = "Карелина"):
+def save_new_person(embedding, photo_path: str, species: str = "Карелина", **card_data):
     """
     Вызывается, когда бот хочет сохранить новую особь
     """
@@ -102,8 +102,9 @@ def save_new_person(embedding, photo_path: str, species: str = "Карелина
         photo_path=photo_path,
         species=species,
         template_type="ИК-1",
-        date=datetime.now().strftime("%Y-%m-%d"),
+        date=datetime.now().strftime("%d.%m.%Y"),  # Формат из ТЗ
         notes="Добавлено через бота",
+        **card_data  # Передаём все дополнительные поля
     )
     return individual_id
 
