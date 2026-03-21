@@ -93,18 +93,30 @@ async def photo_processing(config, filepath):
         return False
 
 
-def save_new_person(embedding, photo_path: str, species: str = "Карелина", **card_data):
+def save_new_person(
+    embedding, 
+    photo_path_full: str,           # ← полное фото от пользователя
+    photo_path_cropped: str = None, # ← кроп от YOLO (может быть None)
+    species: str = "Карелина",
+    project_name: str = "Основной", # ← Добавлено
+    template_type: str = "ИК-1",
+    individual_id: str = None,      # ← Добавлено
+    **card_data
+):
     """
     Вызывается, когда бот хочет сохранить новую особь
     """
     individual_id = save_new_individual(
         embedding=embedding,
-        photo_path=photo_path,
+        photo_path_full=photo_path_full,      # ← Исправлено: правильное имя
+        photo_path_cropped=photo_path_cropped, # ← Добавлено: путь к кропу
         species=species,
-        template_type="ИК-1",
+        project_name=project_name,             # ← Добавлено
+        template_type=template_type,
+        individual_id=individual_id,           # ← Добавлено
         date=datetime.now().strftime("%d.%m.%Y"),
         notes="Добавлено через бота",
-        **card_data  # Передаём все дополнительные поля
+        **card_data
     )
     return individual_id
 

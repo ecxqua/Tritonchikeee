@@ -30,14 +30,14 @@ def _get_next_photo_number(cursor, individual_id: str) -> str:
 
 def save_new_individual(
     embedding,
-    photo_path_full: str = None,      # ← Теперь может быть None (для legacy)
+    photo_path_full: str = None,
     photo_path_cropped: str = None,
     species: str = "Карелина",
     project_name: str = "Основной",
     template_type: str = "ИК-1",
     individual_id: str = None,
     photo_number: str = None,
-    is_legacy: bool = False,          # ← Флаг для старых данных
+    is_legacy: bool = False,
     **card_data
 ):
     """
@@ -57,23 +57,21 @@ def save_new_individual(
     
     try:
         # === 1. ТАБЛИЦА individuals (Карточка) ===
-        # Для legacy без полного фото используем кроп в поле photo_path
-        main_photo_ref = photo_path_full if photo_path_full else photo_path_cropped
-        
+        # ← ИЗМЕНЕНО: Убрали photo_path, photo_number, embedding_index
         cursor.execute('''
             INSERT INTO individuals (
                 individual_id, template_type, species, project_name,
-                photo_path, photo_number, embedding_index, created_at,
+                created_at,
                 date, notes,
                 length_body, length_tail, length_total, weight, sex,
                 birth_year_exact, birth_year_approx, origin_region,
                 length_device, weight_device,
                 parent_male_id, parent_female_id, release_date, water_body_name,
                 meeting_time, status, water_body_number
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (
             individual_id, template_type, species, project_name,
-            main_photo_ref, photo_number, -1, datetime.now().isoformat(),
+            datetime.now().isoformat(),
             card_data.get('date', datetime.now().strftime("%d.%m.%Y")),
             card_data.get('notes'),
             card_data.get('length_body'), card_data.get('length_tail'),
@@ -88,7 +86,6 @@ def save_new_individual(
         ))
         
         # === 2. ТАБЛИЦА photos (Полное фото) ===
-        # Сохраняем ТОЛЬКО если есть полное фото (не legacy)
         if photo_path_full and not is_legacy:
             cursor.execute('''
                 INSERT INTO photos (
@@ -98,11 +95,10 @@ def save_new_individual(
             ''', (
                 individual_id, 'full', photo_number, photo_path_full,
                 card_data.get('date', datetime.now().strftime("%d.%m.%Y")),
-                card_data.get('meeting_time'), 1, 0, None, 0  # is_legacy=0
+                card_data.get('meeting_time'), 1, 0, None, 0
             ))
         
         # === 3. ТАБЛИЦА photos (Кроп брюшка) ===
-        # Сохраняем всегда, если кроп есть (нужен для ViT)
         if photo_path_cropped:
             cursor.execute('''
                 INSERT INTO photos (
@@ -113,8 +109,8 @@ def save_new_individual(
                 individual_id, 'cropped', photo_number, photo_path_cropped,
                 card_data.get('date', datetime.now().strftime("%d.%m.%Y")),
                 card_data.get('meeting_time'), 
-                1 if not photo_path_full else 0,  # is_main=1 если нет полного
-                1, -1, 1 if is_legacy else 0      # is_legacy=1 если флаг установлен
+                1 if not photo_path_full else 0,
+                1, -1, 1 if is_legacy else 0
             ))
         
         conn.commit()
@@ -140,11 +136,18 @@ def save_new_individual(
         raise e
 
 
-def _validate_template_fields(template_type: str, card_data: dict):
+def _validate_template_fields(template_type: str, card_data: dict):  
+    """
+    Проверяет наличие обязательных полей для выбранного шаблона
+    """
     required = REQUIRED_FIELDS.get(template_type, [])
     missing = [field for field in required if card_data.get(field) is None]
+    
     if missing:
-        raise ValueError(f"Для шаблона '{template_type}' обязательны поля: {', '.join(missing)}")
+        raise ValueError(
+            f"Для шаблона '{template_type}' обязательны поля: {', '.join(missing)}\n"
+            f"Переданные данные: {list(card_data.keys())}"
+        )
 
 
 def update_individual(individual_id: str, **kwargs):
@@ -169,7 +172,7 @@ def update_individual(individual_id: str, **kwargs):
 
 def add_encounter(
     individual_id: str,
-    template_type: str,          # ← КВ-1 или КВ-2
+    template_type: str,
     photo_path_full: str = None,
     photo_path_cropped: str = None,
     embedding=None,
@@ -177,57 +180,51 @@ def add_encounter(
 ):
     """
     Добавляет НОВУЮ ВСТРЕЧУ (КВ-1/КВ-2) для существующей особи.
-    В отличие от add_photo, эта функция создаёт запись в individuals,
-    чтобы сохранить биометрию и статус встречи.
     """
     init_database()
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     
-    # Проверка шаблона
     if template_type not in ["КВ-1", "КВ-2"]:
         raise ValueError("Для добавления встречи используйте шаблоны КВ-1 или КВ-2")
     
-    # Валидация полей встречи
     _validate_template_fields(template_type, card_data)
-    
     photo_number = _get_next_photo_number(cursor, individual_id)
     
     try:
         # 1. Создаем запись о встрече в individuals
-        main_photo_ref = photo_path_full if photo_path_full else photo_path_cropped
-        
+        # ← ИЗМЕНЕНО: Убрали photo_path, photo_number, embedding_index
         cursor.execute('''
             INSERT INTO individuals (
-                individual_id, template_type, photo_path, photo_number,
+                individual_id, template_type, species, project_name,
                 date, meeting_time, status, water_body_number, water_body_name,
                 length_body, length_tail, length_total, weight, sex, notes,
-                species, project_name, created_at, embedding_index
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (
-            individual_id, template_type, main_photo_ref, photo_number,
+            individual_id, template_type, "Карелина", "Основной",
             card_data.get('date', datetime.now().strftime("%d.%m.%Y")),
             card_data.get('time'), card_data.get('status'),
             card_data.get('water_body_number'), card_data.get('water_body_name'),
             card_data.get('length_body'), card_data.get('length_tail'),
             card_data.get('length_total'), card_data.get('weight'),
             card_data.get('sex'), card_data.get('notes'),
-            "Карелина", "Основной", datetime.now().isoformat(), -1
+            datetime.now().isoformat()
         ))
         
         # 2. Сохраняем фото (полное)
         if photo_path_full:
             cursor.execute('''
-                INSERT INTO photos (individual_id, photo_type, photo_number, photo_path, date_taken, is_main, is_legacy)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-            ''', (individual_id, 'full', photo_number, photo_path_full, card_data.get('date'), 0, 0))
+                INSERT INTO photos (individual_id, photo_type, photo_number, photo_path, date_taken, is_main, is_processed, embedding_index, is_legacy)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (individual_id, 'full', photo_number, photo_path_full, card_data.get('date'), 0, 0, None, 0))
         
         # 3. Сохраняем фото (кроп)
         if photo_path_cropped:
             cursor.execute('''
-                INSERT INTO photos (individual_id, photo_type, photo_number, photo_path, date_taken, is_processed, is_legacy)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-            ''', (individual_id, 'cropped', photo_number, photo_path_cropped, card_data.get('date'), 1, 0))
+                INSERT INTO photos (individual_id, photo_type, photo_number, photo_path, date_taken, is_main, is_processed, embedding_index, is_legacy)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (individual_id, 'cropped', photo_number, photo_path_cropped, card_data.get('date'), 0, 1, -1, 0))
         
         conn.commit()
         conn.close()
@@ -283,11 +280,11 @@ if __name__ == "__main__":
     try:
         save_new_individual(
             embedding=None,
-            photo_path_full=None,  # ← Нет полного фото
+            photo_path_full=None,
             photo_path_cropped="data/dataset_crop/karelin/47/IMG_001.jpg",
             template_type="ИК-1",
             individual_id="NT-47",
-            is_legacy=True,        # ← Флаг установлен
+            is_legacy=True,
             length_body=40.0, weight=3.0, sex="Ж"
         )
     except Exception as e:
