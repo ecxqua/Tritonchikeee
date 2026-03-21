@@ -11,18 +11,71 @@ REQUIRED_FIELDS = {
     "ИК-1": ["length_body", "weight", "sex"],
     "ИК-2": ["parent_male_id", "parent_female_id", "water_body_name", "release_date"],
     "КВ-1": ["status", "water_body_number", "length_body", "length_tail"],
-    "КВ-2": ["status", "water_body_name"]
+    "КВ-2": ["status", "water_body_name"],
 }
 
 
+def get_next_animal_number(cursor, species: str) -> int:
+    """
+    Возвращает следующий порядковый номер для животного данного вида.
+    Считает уникальные номера особей (без пропусков).
+    """
+    species_prefix = {
+        "Карелина": "K",
+        "Гребенчатый": "R",
+        "Ребристый": "R"
+    }.get(species, "X")
+    
+    # Считаем УНИКАЛЬНЫЕ номера особей этого вида
+    # Например: NT-K-1, NT-K-2, NT-K-3 → вернёт 4
+    cursor.execute('''
+        SELECT COUNT(DISTINCT CAST(SUBSTR(individual_id, 5, INSTR(SUBSTR(individual_id, 5), '-') - 1) AS INTEGER))
+        FROM individuals
+        WHERE individual_id LIKE ?
+    ''', (f"NT-{species_prefix}-%",))
+    
+    count = cursor.fetchone()[0]
+    return (count or 0) + 1
+
+
+def generate_card_id(cursor, species: str, template_type: str, animal_id: str = None) -> str:
+    """
+    Генерирует ID карточки.
+    
+    Если animal_id передан → использует его (повторная встреча).
+    Если animal_id НЕ передан → создаёт новый номер особи (новая особь).
+    
+    Формат: NT-{Вид}-{Номер}-{Тип}
+    Пример: NT-K-47-ИК1
+    """
+    species_prefix = {
+        "Карелина": "K",
+        "Гребенчатый": "R",
+        "Ребристый": "R"
+    }.get(species, "X")
+    
+    template_short = template_type.replace("-", "")
+    
+    # 1. Если ID особи не передан → генерируем новый номер (автоинкремент)
+    if animal_id is None:
+        new_num = get_next_animal_number(cursor, species)
+        animal_id = f"NT-{species_prefix}-{new_num}"
+    
+    # 2. Формируем ID карточки
+    card_id = f"{animal_id}-{template_short}"
+    
+    # 3. Проверяем, нет ли уже такой карточки
+    cursor.execute('SELECT individual_id FROM individuals WHERE individual_id = ?', (card_id,))
+    if cursor.fetchone():
+        print(f"⚠️ Карточка {card_id} уже существует. Возвращаем существующий ID.")
+        return card_id
+    
+    return card_id
+
 def _get_next_photo_number(cursor, individual_id: str) -> str:
-    """
-    Автоматически генерирует порядковый номер фото (01, 02, 03...)
-    """
     base_id = individual_id.replace("NT-", "")
     cursor.execute(
-        "SELECT COUNT(*) FROM photos WHERE individual_id LIKE ?",
-        (f"NT-{base_id}%",)
+        "SELECT COUNT(*) FROM photos WHERE individual_id LIKE ?", (f"NT-{base_id}%",)
     )
     count = cursor.fetchone()[0]
     return f"{count + 1:02d}"
@@ -38,27 +91,24 @@ def save_new_individual(
     individual_id: str = None,
     photo_number: str = None,
     is_legacy: bool = False,
-    **card_data
+    **card_data,
 ):
-    """
-    Сохраняет новую особь в базу (карточка + все фотографии)
-    """
-    init_database() 
+    init_database()
     _validate_template_fields(template_type, card_data)
-    
+
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
-    
+
     if individual_id is None:
         individual_id = f"NT-{datetime.now().strftime('%y%m%d%H%M%S')}"
-    
+
     if photo_number is None:
         photo_number = _get_next_photo_number(cursor, individual_id)
-    
+
     try:
-        # === 1. ТАБЛИЦА individuals (Карточка) ===
-        # ← ИЗМЕНЕНО: Убрали photo_path, photo_number, embedding_index
-        cursor.execute('''
+        # === 1. ТАБЛИЦА individuals (24 колонки = 24 значения) ===
+        cursor.execute(
+            """
             INSERT INTO individuals (
                 individual_id, template_type, species, project_name,
                 created_at,
@@ -68,81 +118,99 @@ def save_new_individual(
                 length_device, weight_device,
                 parent_male_id, parent_female_id, release_date, water_body_name,
                 meeting_time, status, water_body_number
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (
-            individual_id, template_type, species, project_name,
-            datetime.now().isoformat(),
-            card_data.get('date', datetime.now().strftime("%d.%m.%Y")),
-            card_data.get('notes'),
-            card_data.get('length_body'), card_data.get('length_tail'),
-            card_data.get('length_total'), card_data.get('weight'),
-            card_data.get('sex'), card_data.get('birth_year_exact'),
-            card_data.get('birth_year_approx'), card_data.get('origin_region'),
-            card_data.get('length_device'), card_data.get('weight_device'),
-            card_data.get('parent_male_id'), card_data.get('parent_female_id'),
-            card_data.get('release_date'), card_data.get('water_body_name'),
-            card_data.get('meeting_time'), card_data.get('status'),
-            card_data.get('water_body_number')
-        ))
-        
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+            (
+                individual_id,  # 1
+                template_type,  # 2
+                species,  # 3
+                project_name,  # 4
+                datetime.now().isoformat(),  # 5
+                card_data.get("date", datetime.now().strftime("%d.%m.%Y")),  # 6
+                card_data.get("notes"),  # 7
+                card_data.get("length_body"),  # 8
+                card_data.get("length_tail"),  # 9
+                card_data.get("length_total"),  # 10
+                card_data.get("weight"),  # 11
+                card_data.get("sex"),  # 12
+                card_data.get("birth_year_exact"),  # 13
+                card_data.get("birth_year_approx"),  # 14
+                card_data.get("origin_region"),  # 15
+                card_data.get("length_device"),  # 16
+                card_data.get("weight_device"),  # 17
+                card_data.get("parent_male_id"),  # 18
+                card_data.get("parent_female_id"),  # 19
+                card_data.get("release_date"),  # 20
+                card_data.get("water_body_name"),  # 21
+                card_data.get("meeting_time"),  # 22
+                card_data.get("status"),  # 23
+                card_data.get("water_body_number"),  # 24
+            ),
+        )
+
         # === 2. ТАБЛИЦА photos (Полное фото) ===
         if photo_path_full and not is_legacy:
-            cursor.execute('''
+            cursor.execute(
+                """
                 INSERT INTO photos (
                     individual_id, photo_type, photo_number, photo_path,
                     date_taken, time_taken, is_main, is_processed, embedding_index, is_legacy
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (
-                individual_id, 'full', photo_number, photo_path_full,
-                card_data.get('date', datetime.now().strftime("%d.%m.%Y")),
-                card_data.get('meeting_time'), 1, 0, None, 0
-            ))
-        
+            """,
+                (
+                    individual_id,
+                    "full",
+                    photo_number,
+                    photo_path_full,
+                    card_data.get("date", datetime.now().strftime("%d.%m.%Y")),
+                    card_data.get("meeting_time"),
+                    1,
+                    0,
+                    None,
+                    0,
+                ),
+            )
+
         # === 3. ТАБЛИЦА photos (Кроп брюшка) ===
         if photo_path_cropped:
-            cursor.execute('''
+            cursor.execute(
+                """
                 INSERT INTO photos (
                     individual_id, photo_type, photo_number, photo_path,
                     date_taken, time_taken, is_main, is_processed, embedding_index, is_legacy
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (
-                individual_id, 'cropped', photo_number, photo_path_cropped,
-                card_data.get('date', datetime.now().strftime("%d.%m.%Y")),
-                card_data.get('meeting_time'), 
-                1 if not photo_path_full else 0,
-                1, -1, 1 if is_legacy else 0
-            ))
-        
+            """,
+                (
+                    individual_id,
+                    "cropped",
+                    photo_number,
+                    photo_path_cropped,
+                    card_data.get("date", datetime.now().strftime("%d.%m.%Y")),
+                    card_data.get("meeting_time"),
+                    1 if not photo_path_full else 0,
+                    1,
+                    -1,
+                    1 if is_legacy else 0,
+                ),
+            )
+
         conn.commit()
-        
-        # === 4. Обновление embedding_index (FAISS) ===
-        if embedding is not None and photo_path_cropped:
-            # Здесь будет вызов FAISS: index.add(embedding)
-            # embedding_idx = index.add(embedding)
-            # cursor.execute("UPDATE photos SET embedding_index = ? WHERE photo_path = ?", 
-            #                (embedding_idx, photo_path_cropped))
-            # conn.commit()
-            pass
-        
         conn.close()
-        
+
         print(f"✅ Особь сохранена: {individual_id} ({template_type})")
         print(f"   Фото: {photo_number} | Legacy: {is_legacy}")
         return individual_id
-        
+
     except Exception as e:
         conn.rollback()
         conn.close()
         raise e
 
 
-def _validate_template_fields(template_type: str, card_data: dict):  
-    """
-    Проверяет наличие обязательных полей для выбранного шаблона
-    """
+def _validate_template_fields(template_type: str, card_data: dict):
     required = REQUIRED_FIELDS.get(template_type, [])
     missing = [field for field in required if card_data.get(field) is None]
-    
+
     if missing:
         raise ValueError(
             f"Для шаблона '{template_type}' обязательны поля: {', '.join(missing)}\n"
@@ -151,7 +219,6 @@ def _validate_template_fields(template_type: str, card_data: dict):
 
 
 def update_individual(individual_id: str, **kwargs):
-    """Обновляет данные карточки особи"""
     init_database()
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
@@ -176,61 +243,94 @@ def add_encounter(
     photo_path_full: str = None,
     photo_path_cropped: str = None,
     embedding=None,
-    **card_data
+    **card_data,
 ):
-    """
-    Добавляет НОВУЮ ВСТРЕЧУ (КВ-1/КВ-2) для существующей особи.
-    """
     init_database()
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
-    
+
     if template_type not in ["КВ-1", "КВ-2"]:
         raise ValueError("Для добавления встречи используйте шаблоны КВ-1 или КВ-2")
-    
+
     _validate_template_fields(template_type, card_data)
     photo_number = _get_next_photo_number(cursor, individual_id)
-    
+
     try:
-        # 1. Создаем запись о встрече в individuals
-        # ← ИЗМЕНЕНО: Убрали photo_path, photo_number, embedding_index
-        cursor.execute('''
+        # 1. Создаем запись о встрече в individuals (16 колонок = 16 значений)
+        cursor.execute(
+            """
             INSERT INTO individuals (
                 individual_id, template_type, species, project_name,
                 date, meeting_time, status, water_body_number, water_body_name,
                 length_body, length_tail, length_total, weight, sex, notes,
                 created_at
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (
-            individual_id, template_type, "Карелина", "Основной",
-            card_data.get('date', datetime.now().strftime("%d.%m.%Y")),
-            card_data.get('time'), card_data.get('status'),
-            card_data.get('water_body_number'), card_data.get('water_body_name'),
-            card_data.get('length_body'), card_data.get('length_tail'),
-            card_data.get('length_total'), card_data.get('weight'),
-            card_data.get('sex'), card_data.get('notes'),
-            datetime.now().isoformat()
-        ))
-        
+        """,
+            (
+                individual_id,  # 1
+                template_type,  # 2
+                "Карелина",  # 3
+                "Основной",  # 4
+                card_data.get("date", datetime.now().strftime("%d.%m.%Y")),  # 5
+                card_data.get("time"),  # 6
+                card_data.get("status"),  # 7
+                card_data.get("water_body_number"),  # 8
+                card_data.get("water_body_name"),  # 9
+                card_data.get("length_body"),  # 10
+                card_data.get("length_tail"),  # 11
+                card_data.get("length_total"),  # 12
+                card_data.get("weight"),  # 13
+                card_data.get("sex"),  # 14
+                card_data.get("notes"),  # 15
+                datetime.now().isoformat(),  # 16
+            ),
+        )
+
         # 2. Сохраняем фото (полное)
         if photo_path_full:
-            cursor.execute('''
+            cursor.execute(
+                """
                 INSERT INTO photos (individual_id, photo_type, photo_number, photo_path, date_taken, is_main, is_processed, embedding_index, is_legacy)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (individual_id, 'full', photo_number, photo_path_full, card_data.get('date'), 0, 0, None, 0))
-        
+            """,
+                (
+                    individual_id,
+                    "full",
+                    photo_number,
+                    photo_path_full,
+                    card_data.get("date"),
+                    0,
+                    0,
+                    None,
+                    0,
+                ),
+            )
+
         # 3. Сохраняем фото (кроп)
         if photo_path_cropped:
-            cursor.execute('''
+            cursor.execute(
+                """
                 INSERT INTO photos (individual_id, photo_type, photo_number, photo_path, date_taken, is_main, is_processed, embedding_index, is_legacy)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (individual_id, 'cropped', photo_number, photo_path_cropped, card_data.get('date'), 0, 1, -1, 0))
-        
+            """,
+                (
+                    individual_id,
+                    "cropped",
+                    photo_number,
+                    photo_path_cropped,
+                    card_data.get("date"),
+                    0,
+                    1,
+                    -1,
+                    0,
+                ),
+            )
+
         conn.commit()
         conn.close()
         print(f"✅ Встреча {template_type} добавлена к особи {individual_id}")
         return photo_number
-        
+
     except Exception as e:
         conn.rollback()
         conn.close()
@@ -238,18 +338,20 @@ def add_encounter(
 
 
 def get_individual_photos(individual_id: str):
-    """Получает все фотографии особи"""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
-    
-    cursor.execute('''
+
+    cursor.execute(
+        """
         SELECT photo_id, photo_type, photo_number, photo_path, 
                date_taken, is_main, is_legacy
         FROM photos
         WHERE individual_id = ?
         ORDER BY photo_number ASC, photo_type DESC
-    ''', (individual_id,))
-    
+    """,
+        (individual_id,),
+    )
+
     photos = cursor.fetchall()
     conn.close()
     return photos
@@ -257,53 +359,123 @@ def get_individual_photos(individual_id: str):
 
 # === ТЕСТЫ ===
 if __name__ == "__main__":
-    print("🧪 Тестирование сохранения (исправленная версия)...\n")
+    print("🧪 Тестирование сохранения с авто-нумерацией...\n")
     
-    # Тест 1: Новая особь (ИК-1)
-    print("1️⃣ Тест ИК-1 (Новая особь)")
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    # === 1. Первая особь Карелина ===
+    print("1️⃣ Первая особь Карелина (ИК-1)")
     try:
+        card_id = generate_card_id(cursor, species="Карелина", template_type="ИК-1")
+        # → NT-K-1-ИК1
+        
         save_new_individual(
             embedding=None,
-            photo_path_full="data/photos/full/newt_001.jpg",
-            photo_path_cropped="data/crop/newt_001.jpg",
+            photo_path_full="data/photos/full/test_001.jpg",
+            photo_path_cropped="data/crop/test_001.jpg",
+            species="Карелина",
             template_type="ИК-1",
-            length_body=42.5, weight=3.2, sex="М",
-            notes="Тестовая особь"
+            individual_id=card_id,
+            length_body=42.5,
+            length_tail=38.0,
+            weight=3.2,
+            sex="М",
+            notes="Первичная регистрация"
         )
+        print(f"   ✅ Сохранено: {card_id}")
     except Exception as e:
-        print(f"❌ Ошибка: {e}")
+        print(f"   ❌ Ошибка: {e}")
     
     print("\n" + "="*50 + "\n")
     
-    # Тест 2: Legacy особь (только кроп)
-    print("2️⃣ Тест Legacy (Только кроп из датасета)")
+    # === 2. Вторая особь Карелина ===
+    print("2️⃣ Вторая особь Карелина (ИК-1)")
     try:
+        card_id = generate_card_id(cursor, species="Карелина", template_type="ИК-1")
+        # → NT-K-2-ИК1
+        
         save_new_individual(
             embedding=None,
-            photo_path_full=None,
-            photo_path_cropped="data/dataset_crop/karelin/47/IMG_001.jpg",
+            photo_path_full="data/photos/full/test_002.jpg",
+            photo_path_cropped="data/crop/test_002.jpg",
+            species="Карелина",
             template_type="ИК-1",
-            individual_id="NT-47",
-            is_legacy=True,
-            length_body=40.0, weight=3.0, sex="Ж"
+            individual_id=card_id,
+            length_body=45.0,
+            length_tail=40.0,
+            weight=3.5,
+            sex="Ж",
+            notes="Вторая особь"
         )
+        print(f"   ✅ Сохранено: {card_id}")
     except Exception as e:
-        print(f"❌ Ошибка: {e}")
+        print(f"   ❌ Ошибка: {e}")
     
     print("\n" + "="*50 + "\n")
     
-    # Тест 3: Повторная встреча (КВ-1)
-    print("3️⃣ Тест КВ-1 (Повторная встреча)")
+    # === 3. Первая особь Гребенчатый ===
+    print("3️⃣ Первая особь Гребенчатый (ИК-1)")
     try:
+        card_id = generate_card_id(cursor, species="Гребенчатый", template_type="ИК-1")
+        # → NT-R-1-ИК1
+        
+        save_new_individual(
+            embedding=None,
+            photo_path_full="data/photos/full/test_003.jpg",
+            photo_path_cropped="data/crop/test_003.jpg",
+            species="Гребенчатый",
+            template_type="ИК-1",
+            individual_id=card_id,
+            length_body=50.0,
+            length_tail=45.0,
+            weight=4.5,
+            sex="М",
+            notes="Гребенчатый тритон"
+        )
+        print(f"   ✅ Сохранено: {card_id}")
+    except Exception as e:
+        print(f"   ❌ Ошибка: {e}")
+    
+    print("\n" + "="*50 + "\n")
+    
+    # === 4. Повторная встреча для NT-K-1 ===
+    print("4️⃣ Повторная встреча для NT-K-1 (КВ-1)")
+    try:
+        card_id = generate_card_id(cursor, species="Карелина", template_type="КВ-1", animal_id="NT-K-1")
+        # → NT-K-1-КВ1
+        
         add_encounter(
-            individual_id="NT-47",
+            individual_id=card_id,
             template_type="КВ-1",
-            photo_path_full="data/photos/full/newt_001_v2.jpg",
-            photo_path_cropped="data/crop/newt_001_v2.jpg",
+            photo_path_full="data/photos/full/test_001_v2.jpg",
+            photo_path_cropped="data/crop/test_001_v2.jpg",
             status="жив",
             water_body_number="Пруд №3",
-            length_body=45.0,
-            date="20.06.2024"
+            length_body=44.0,
+            length_tail=39.0,
+            weight=3.4,
+            sex="М",
+            date="20.06.2024",
+            notes="Повторная поимка"
         )
+        print(f"   ✅ Сохранено: {card_id}")
     except Exception as e:
-        print(f"❌ Ошибка: {e}")
+        print(f"   ❌ Ошибка: {e}")
+    
+    print("\n" + "="*50 + "\n")
+    
+    # === 5. Проверка: попытка создать дубликат ИК-1 для NT-K-1 ===
+    print("5️⃣ Проверка дубля: ИК-1 для NT-K-1 (должен вернуть тот же ID)")
+    try:
+        card_id = generate_card_id(cursor, species="Карелина", template_type="ИК-1", animal_id="NT-K-1")
+        # → NT-K-1-ИК1 (уже существует)
+        print(f"   ✅ Вернут существующий ID: {card_id}")
+    except Exception as e:
+        print(f"   ❌ Ошибка: {e}")
+    
+    conn.commit()
+    conn.close()
+    
+    print("\n" + "="*50 + "\n")
+    print("📊 Тесты завершены! Проверьте базу данных.")
