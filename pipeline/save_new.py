@@ -105,8 +105,8 @@ def _get_next_photo_number(cursor, individual_id: str) -> str:
     """
     Автоматически генерирует порядковый номер фото (01, 02, 03...).
     
-    ⚠️ ВНИМАНИЕ: Сейчас считает по ВСЕМ карточкам особи (LIKE).
-    Если нужна нумерация по карточке → заменить на WHERE individual_id = ?
+    ✅ ИСПРАВЛЕНО: Считает фото ТОЛЬКО для этой карточки (точное совпадение).
+    Каждая карточка начинает нумерацию с 01.
     
     Args:
         cursor: Курсор SQLite
@@ -115,10 +115,10 @@ def _get_next_photo_number(cursor, individual_id: str) -> str:
     Returns:
         str: Номер фото с ведущим нулём ("01", "02", ...)
     """
-    base_id = individual_id.replace("NT-", "")
+    # ← ИСПРАВЛЕНО: Точное совпадение (=), а не поиск по подстроке (LIKE)
     cursor.execute(
-        "SELECT COUNT(*) FROM photos WHERE individual_id LIKE ?",
-        (f"NT-{base_id}%",)  # ← Считает все фото особи (все карточки)
+        "SELECT COUNT(*) FROM photos WHERE individual_id = ?",
+        (individual_id,)
     )
     count = cursor.fetchone()[0]
     return f"{count + 1:02d}"
