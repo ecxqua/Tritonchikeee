@@ -253,8 +253,8 @@ async def process_single_image(
 
         # Создание unwrapper
         unwrapper = TritonMaskUnwrapper(
-            trim_bottom_pct,
             trim_top_pct,
+            trim_bottom_pct,
             final_size,
             seg_model_path
         )
