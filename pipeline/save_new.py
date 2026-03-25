@@ -4,6 +4,10 @@
 - Если FAISS индекс не существует → создаётся новый автоматически
 - Ошибки FAISS не прерывают сохранение → БД сохранится даже если FAISS упадёт
 - Транзакции → FAISS сохраняется после commit БД (возмоен рассинхрон)
+
+Для лучшей архитектуры можно инкапсулировать FAISS в свой класс с возможонстю тразнакций (add, commit).
+
+При запуске теста учтите, что появится рассинхрон баз данных!
 """
 
 
@@ -120,14 +124,7 @@ def update_photo_embedding_index(
 def get_next_animal_number(cursor, species: str) -> int:
     """
     Возвращает следующий порядковый номер для животного данного вида.
-    Считает уникальные номера особей (без пропусков).
-    
-    Args:
-        cursor: Курсор SQLite
-        species: Вид тритона ("Карелина" / "Гребенчатый")
-    
-    Returns:
-        int: Следующий номер (например, 47 → 48)
+    🔥 ИСПРАВЛЕНО: Синтаксис SQLite (INSTR с 2 аргументами)
     """
     species_prefix = {
         "Карелина": "K",
@@ -135,10 +132,18 @@ def get_next_animal_number(cursor, species: str) -> int:
         "Ребристый": "R"
     }.get(species, "X")
     
+    # 🔥 SQLite-совместимый SQL
+    # Формат: NT-K-2-ИК1 → извлекаем "2"
+    # 1. SUBSTR(individual_id, 6) → "2-ИК1" (после "NT-K-")
+    # 2. INSTR(..., '-') → позиция следующего дефиса
+    # 3. SUBSTR(..., 1, pos-1) → извлекаем число
     cursor.execute('''
         SELECT COUNT(DISTINCT CAST(
-            SUBSTR(individual_id, 5, INSTR(SUBSTR(individual_id, 5), '-') - 1) 
-            AS INTEGER)
+            SUBSTR(
+                individual_id,
+                6,
+                INSTR(SUBSTR(individual_id, 6), '-') - 1
+            ) AS INTEGER)
         )
         FROM individuals
         WHERE individual_id LIKE ?
@@ -147,22 +152,13 @@ def get_next_animal_number(cursor, species: str) -> int:
     count = cursor.fetchone()[0]
     return (count or 0) + 1
 
-
 # ============================================================================
 # ГЕНЕРАЦИЯ ID КАРТОЧКИ
 # ============================================================================
 def generate_card_id(cursor, species: str, template_type: str, animal_id: str = None) -> str:
     """
     Генерирует ID карточки.
-    
-    Args:
-        cursor: Курсор SQLite
-        species: Вид тритона
-        template_type: Тип карточки (ИК-1, ИК-2, КВ-1, КВ-2)
-        animal_id: ID животного (если None → создаётся новый)
-    
-    Returns:
-        str: ID карточки (например, "NT-K-47-ИК1")
+    🔥 ИСПРАВЛЕНО: Ищет СВОБОДНЫЙ ID, не возвращает существующий
     """
     species_prefix = {
         "Карелина": "K",
@@ -172,18 +168,28 @@ def generate_card_id(cursor, species: str, template_type: str, animal_id: str = 
     
     template_short = template_type.replace("-", "")
     
+    # 1. Если ID особи не передан → генерируем новый номер
     if animal_id is None:
-        new_num = get_next_animal_number(cursor, species)
-        animal_id = f"NT-{species_prefix}-{new_num}"
+        animal_id = f"NT-{species_prefix}-{get_next_animal_number(cursor, species)}"
     
-    card_id = f"{animal_id}-{template_short}"
+    # 2. 🔥 ИСПРАВЛЕНО: Ищем СВОБОДНЫЙ номер (цикл)
+    attempts = 0
+    while attempts < 1000:  # Защита от бесконечного цикла
+        card_id = f"{animal_id}-{template_short}"
+        
+        # Проверяем есть ли уже такая карточка
+        cursor.execute('SELECT individual_id FROM individuals WHERE individual_id = ?', (card_id,))
+        if not cursor.fetchone():
+            # ✅ Свободный ID найден!
+            return card_id
+        
+        # ❌ Занят, пробуем следующий номер
+        attempts += 1
+        # Извлекаем текущий номер и увеличиваем
+        current_num = int(animal_id.split('-')[2])
+        animal_id = f"NT-{species_prefix}-{current_num + 1}"
     
-    cursor.execute('SELECT individual_id FROM individuals WHERE individual_id = ?', (card_id,))
-    if cursor.fetchone():
-        print(f"⚠️ Карточка {card_id} уже существует. Возвращаем существующий ID.")
-        return card_id
-    
-    return card_id
+    raise ValueError(f"Не удалось сгенерировать уникальный ID после {attempts} попыток")
 
 
 # ============================================================================
@@ -534,15 +540,30 @@ def get_individual_photos(individual_id: str):
 if __name__ == "__main__":
     print("🧪 Тестирование интеграции с FAISS...\n")
     
+    # 🔥 ВАЖНО: Очищаем тестовые данные перед запуском
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
+    
+    # Удаляем тестовые записи (если есть)
+    cursor.execute("DELETE FROM photos WHERE individual_id LIKE 'NT-K-99%'")
+    cursor.execute("DELETE FROM individuals WHERE individual_id LIKE 'NT-K-99%'")
+    cursor.execute("DELETE FROM photos WHERE photo_path LIKE '%test_faiss%'")
+    cursor.execute("DELETE FROM individuals WHERE project_name = 'Тест'")
+    conn.commit()
+    conn.close()
     
     # === ТЕСТ 1: Сохранение с embedding ===
     print("1️⃣ Сохранение особи с embedding (должно добавить в FAISS)")
     try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        
+        # 🔥 Генерируем новый ID автоматически
         card_id = generate_card_id(cursor, species="Карелина", template_type="ИК-1")
+        print(f"   Сгенерирован ID: {card_id}")
+        
         test_embedding = np.random.rand(512).astype('float32')
-        test_embedding = test_embedding / np.linalg.norm(test_embedding)  # L2 norm
+        test_embedding = test_embedding / np.linalg.norm(test_embedding)
         
         save_new_individual(
             embedding=test_embedding,
@@ -553,18 +574,28 @@ if __name__ == "__main__":
             individual_id=card_id,
             length_body=42.5,
             weight=3.2,
-            sex="М"
+            sex="М",
+            project_name="Тест"
         )
         print(f"   ✅ Сохранено: {card_id}")
+        conn.commit()
+        conn.close()
     except Exception as e:
         print(f"   ❌ Ошибка: {e}")
+        conn.rollback()
+        conn.close()
     
     print("\n" + "="*50 + "\n")
     
     # === ТЕСТ 2: Сохранение без embedding ===
     print("2️⃣ Сохранение особи БЕЗ embedding (embedding_index = -1)")
     try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        
+        # 🔥 Должен сгенерировать СЛЕДУЮЩИЙ ID
         card_id = generate_card_id(cursor, species="Карелина", template_type="ИК-1")
+        print(f"   Сгенерирован ID: {card_id}")
         
         save_new_individual(
             embedding=None,
@@ -575,18 +606,30 @@ if __name__ == "__main__":
             individual_id=card_id,
             length_body=45.0,
             weight=3.5,
-            sex="Ж"
+            sex="Ж",
+            project_name="Тест"
         )
         print(f"   ✅ Сохранено: {card_id}")
+        conn.commit()
+        conn.close()
     except Exception as e:
         print(f"   ❌ Ошибка: {e}")
+        conn.rollback()
+        conn.close()
     
     print("\n" + "="*50 + "\n")
     
     # === ТЕСТ 3: add_encounter с embedding ===
     print("3️⃣ Добавление встречи с embedding")
     try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        
+        # 🔥 Генерируем ID для встречи (КВ-1) для существующей особи
+        # Используем animal_id="NT-K-1" чтобы создать NT-K-1-КВ1
         card_id = generate_card_id(cursor, species="Карелина", template_type="КВ-1", animal_id="NT-K-1")
+        print(f"   Сгенерирован ID встречи: {card_id}")
+        
         test_embedding = np.random.rand(512).astype('float32')
         test_embedding = test_embedding / np.linalg.norm(test_embedding)
         
@@ -598,15 +641,18 @@ if __name__ == "__main__":
             status="жив",
             water_body_number="Пруд №3",
             length_body=44.0,
+            length_tail=39.0,  # 🔥 Обязательное поле!
             weight=3.4,
-            sex="М"
+            sex="М",
+            date="20.06.2024"
         )
-        print(f"   ✅ Сохранено: {card_id}")
+        print(f"   ✅ Встреча добавлена: {card_id}")
+        conn.commit()
+        conn.close()
     except Exception as e:
         print(f"   ❌ Ошибка: {e}")
-    
-    conn.commit()
-    conn.close()
+        conn.rollback()
+        conn.close()
     
     # === ПРОВЕРКА FAISS ===
     print("\n" + "="*50 + "\n")
@@ -616,13 +662,14 @@ if __name__ == "__main__":
             index = faiss.read_index(str(FAISS_INDEX_PATH))
             print(f"   ✅ Векторов в индексе: {index.ntotal}")
         else:
-            print(f"   ⚠️ FAISS индекс не создан: {FAISS_INDEX_PATH}")
+            print(f"   ⚠️ FAISS индекс не создан")
     except Exception as e:
         print(f"   ❌ Ошибка чтения FAISS: {e}")
     
     # === ПРОВЕРКА БД ===
     print("\n📊 Проверка БД...")
     conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row  # 🔥 ДОБАВЛЕНО! Теперь row['column'] работает
     cursor = conn.cursor()
     
     cursor.execute("SELECT COUNT(*) FROM photos WHERE embedding_index != -1")
@@ -630,6 +677,18 @@ if __name__ == "__main__":
     
     cursor.execute("SELECT COUNT(*) FROM photos WHERE embedding_index = -1")
     print(f"   ⚠️ Фото без embedding_index: {cursor.fetchone()[0]}")
+    
+    # 🔥 Показываем последние созданные ID
+    cursor.execute("""
+        SELECT individual_id, template_type, project_name 
+        FROM individuals 
+        WHERE project_name = 'Тест' 
+        ORDER BY created_at DESC 
+        LIMIT 5
+    """)
+    print("\n   📋 Последние тестовые особи:")
+    for row in cursor.fetchall():
+        print(f"      {row['individual_id']} ({row['template_type']})")
     
     conn.close()
     

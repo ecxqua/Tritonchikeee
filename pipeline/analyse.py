@@ -122,4 +122,4 @@ def save_new_person(
 
 
 if __name__ == "__main__":
-    asyncio.run(photo_processing(load_config(), "data/input/image.jpg"))
+    asyncio.run(photo_processing(load_config(), "data/input/image.png"))
