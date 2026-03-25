@@ -282,6 +282,65 @@ def _validate_template_fields(template_type: str, card_data: dict):
             f"Переданные данные: {list(card_data.keys())}"
         )
 
+def delete_individual(individual_id: str, delete_photos: bool = True, confirm: bool = False):
+    """
+    Полностью удаляет особь и все её фото (hard delete).
+    
+    ⚠️ ВНИМАНИЕ: Это действие необратимо!
+    ⚠️ Используйте ТОЛЬКО для тестов или исправления ошибок ввода.
+    
+    Args:
+        individual_id: ID карточки для удаления
+        delete_photos: Если True → удаляем фото из БД и с диска
+        confirm: Если True → требует подтверждения
+    """
+    if not confirm:
+        raise ValueError(
+            f"⚠️ ТРЕБУЕТСЯ ПОДТВЕРЖДЕНИЕ!\n"
+            f"Вы уверены, что хотите удалить {individual_id}?\n"
+            f"Передайте confirm=True для подтверждения."
+        )
+    
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    try:
+        # 1. Проверяем, существует ли особь
+        cursor.execute('SELECT individual_id FROM individuals WHERE individual_id = ?', (individual_id,))
+        if not cursor.fetchone():
+            raise ValueError(f"Особь {individual_id} не найдена в базе.")
+        
+        # 2. Получаем пути к фото перед удалением
+        photo_paths = []
+        if delete_photos:
+            cursor.execute('SELECT photo_path FROM photos WHERE individual_id = ?', (individual_id,))
+            photo_paths = [row[0] for row in cursor.fetchall()]
+        
+        # 3. Удаляем фото из БД
+        if delete_photos:
+            cursor.execute('DELETE FROM photos WHERE individual_id = ?', (individual_id,))
+        
+        # 4. Удаляем карточку
+        cursor.execute('DELETE FROM individuals WHERE individual_id = ?', (individual_id,))
+        
+        conn.commit()
+        conn.close()
+        
+        # 5. Удаляем файлы с диска
+        if delete_photos:
+            for photo_path in photo_paths:
+                try:
+                    Path(photo_path).unlink()
+                    print(f"   🗑 Удалён файл: {photo_path}")
+                except FileNotFoundError:
+                    pass
+        
+        print(f"✅ Особь {individual_id} удалена (hard delete).")
+        
+    except Exception as e:
+        conn.rollback()
+        conn.close()
+        raise e
 
 # ============================================================================
 # ОБНОВЛЕНИЕ ДАННЫХ ОСОБИ
