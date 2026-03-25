@@ -2,6 +2,9 @@ io:
   input_folder: "data/input/" # Папка для входных фото
   output_folder: "data/output" # Папка для результатов и артефактов
 
+models:
+  path: "models/"
+
 # Конфигурация модели сегментации.
 seg-model:
   path: "models/best_seg.pt"

@@ -9,6 +9,7 @@ import torch.nn as nn
 import timm
 import pickle
 from torchvision import transforms
+from typing import Optional
 
 
 class EnhancedTripletNet(nn.Module):
@@ -81,7 +82,7 @@ class EnhancedTripletNet(nn.Module):
         return embeddings
 
 
-def load_model(model_path, device):
+def load_model(model_path, device) -> torch.nn.Module:
     model = EnhancedTripletNet(base_model_name='vit_base_patch16_224', embedding_dim=512)
     state_dict = torch.load(model_path, map_location=device)
 
@@ -97,7 +98,7 @@ def load_model(model_path, device):
     return model
 
 
-def get_embedding(image_path, model, transform, device):
+def get_embedding(image_path, model, transform, device) -> Optional[np.ndarray]:
     try:
         image = Image.open(image_path).convert('RGB')
         image = transform(image).unsqueeze(0).to(device)
@@ -109,7 +110,7 @@ def get_embedding(image_path, model, transform, device):
         return None
 
 
-def compute_distances(embeddings1, embedding2):
+def compute_distances(embeddings1, embedding2) -> np.ndarray:
     similarities = cosine_similarity(embeddings1, embedding2.reshape(1, -1))
     return 1 - similarities.flatten()
 
@@ -119,7 +120,7 @@ def save_embeddings(embeddings, paths, save_path):
         pickle.dump({'embeddings': embeddings, 'paths': paths}, f)
 
 
-def load_embeddings(save_path):
+def load_embeddings(save_path) -> tuple[np.ndarray, list[str]]:
     with open(save_path, 'rb') as f:
         data = pickle.load(f)
     return data['embeddings'], data['paths']
