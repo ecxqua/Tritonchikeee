@@ -1,0 +1,38 @@
+{
+  "species": "karelin",
+  "individual": "15",
+  "photos_tested": 3,
+  "results": [
+    {
+      "query": "15-01-1224.JPG",
+      "query_num": 1,
+      "same_individual_in_top10": 1,
+      "different_individual_in_top10": 9,
+      "same_individual_details": [
+        {
+          "file": "IMG_9387.JPG",
+          "similarity": 96.1436996459961
+        }
+      ]
+    },
+    {
+      "query": "15-02-0125.JPG",
+      "query_num": 2,
+      "same_individual_in_top10": 1,
+      "different_individual_in_top10": 9,
+      "same_individual_details": [
+        {
+          "file": "15-03-0225.JPG",
+          "similarity": 94.08622741699219
+        }
+      ]
+    },
+    {
+      "query": "15-03-0225.JPG",
+      "query_num": 3,
+      "same_individual_in_top10": 0,
+      "different_individual_in_top10": 10,
+      "same_individual_details": []
+    }
+  ]
+}

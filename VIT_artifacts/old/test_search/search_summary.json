@@ -1,0 +1,26 @@
+[
+  {
+    "species": "karelin",
+    "individual": "12",
+    "query": "IMG_9373.JPG",
+    "top_k": 5,
+    "same_individual_found": 1,
+    "accuracy": 20.0
+  },
+  {
+    "species": "karelin",
+    "individual": "33",
+    "query": "33-03-0225.JPG",
+    "top_k": 5,
+    "same_individual_found": 0,
+    "accuracy": 0.0
+  },
+  {
+    "species": "ribbed",
+    "individual": "19",
+    "query": "19-02 (2).JPG",
+    "top_k": 5,
+    "same_individual_found": 0,
+    "accuracy": 0.0
+  }
+]

@@ -1,0 +1,2 @@
+epoch,avg_pos_distance,avg_neg_distance,pos_neg_ratio,precision@1,precision@5,recall@1,recall@5
+TEST,0.1813,0.7467,0.2428,0.3236,0.1306,0.3236,0.1306
