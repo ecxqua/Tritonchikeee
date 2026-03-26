@@ -12,16 +12,68 @@ from PIL import Image
 from sklearn.metrics.pairwise import cosine_similarity
 from tqdm import tqdm
 from torchvision import transforms
+from typing import Optional, List, Dict
+import sqlite3
+import faiss
 
+
+# ============================================================================
+# МОДЕЛЬ
+# ============================================================================
 
 class EnhancedTripletNet(nn.Module):
+    """
+    ViT модель для идентификации тритонов по фото брюшка.
+    
+    Архитектура:
+        - Base: ViT-B/16 (pretrained)
+        - Embedding head: 1024 -> 512 -> 512 (с нормализацией)
+        - Projection head: 512 -> 256 -> 128 (для triplet loss)
+    
+    Args:
+        base_model_name: Название модели timm
+        embedding_dim: Размерность выходного эмбеддинга
+        dropout_rate: Коэффициент dropout
+    """
+    
     def __init__(self, base_model_name='vit_base_patch16_224', embedding_dim=512, dropout_rate=0.4):
         super().__init__()
         self.base_model = timm.create_model(base_model_name, pretrained=True)
         in_features = self.base_model.head.in_features
         self.base_model.head = nn.Identity()
 
+<<<<<<< HEAD
         # Замораживаем базовую модель, кроме последних слоев
+=======
+        self._setup_progressive_unfreezing()
+
+        self.embedding = nn.Sequential(
+            nn.Dropout(dropout_rate),
+            nn.Linear(in_features, 1024),
+            nn.BatchNorm1d(1024),
+            nn.GELU(),
+
+            nn.Dropout(dropout_rate),
+            nn.Linear(1024, 512),
+            nn.BatchNorm1d(512),
+            nn.GELU(),
+
+            nn.Dropout(dropout_rate / 2),
+            nn.Linear(512, embedding_dim),
+        )
+
+        self.projection = nn.Sequential(
+            nn.Linear(embedding_dim, 256),
+            nn.BatchNorm1d(256),
+            nn.GELU(),
+            nn.Linear(256, 128)
+        )
+
+        self._init_weights()
+
+    def _setup_progressive_unfreezing(self):
+        """Замораживает大部分 слоёв ViT, размораживает последние 6 блоков"""
+>>>>>>> origin/main
         for param in self.base_model.parameters():
             param.requires_grad = False
 
@@ -32,6 +84,7 @@ class EnhancedTripletNet(nn.Module):
                 for param in self.base_model.blocks[i].parameters():
                     param.requires_grad = True
 
+<<<<<<< HEAD
         # Эмбеддинг сеть
         self.embedding = nn.Sequential(
             nn.Dropout(dropout_rate),
@@ -55,6 +108,10 @@ class EnhancedTripletNet(nn.Module):
         )
 
         # Инициализация весов
+=======
+    def _init_weights(self):
+        """Инициализация весов линейных слоёв"""
+>>>>>>> origin/main
         for module in self.embedding.modules():
             if isinstance(module, nn.Linear):
                 nn.init.kaiming_normal_(module.weight, mode='fan_out', nonlinearity='relu')
@@ -68,6 +125,17 @@ class EnhancedTripletNet(nn.Module):
                     nn.init.constant_(module.bias, 0)
 
     def forward(self, x, return_projection=False):
+        """
+        Прямой проход через модель.
+        
+        Args:
+            x: Входное изображение (batch, 3, 224, 224)
+            return_projection: Вернуть ли projection head output
+        
+        Returns:
+            embedding: Нормализованный вектор (batch, 512)
+            projection: (опционально) вектор (batch, 128)
+        """
         features = self.base_model(x)
         embeddings = self.embedding(features)
         embeddings = F.normalize(embeddings, p=2, dim=1)
@@ -80,7 +148,21 @@ class EnhancedTripletNet(nn.Module):
         return embeddings
 
 
-def load_model(model_path, device):
+# ============================================================================
+# ФУНКЦИИ ЗАГРУЗКИ И ОБРАБОТКИ
+# ============================================================================
+
+def load_model(model_path: str, device: torch.device) -> torch.nn.Module:
+    """
+    Загрузить модель ViT для идентификации.
+    
+    Args:
+        model_path: Путь к файлу весов (.pt)
+        device: Устройство для вычислений (cuda/cpu)
+    
+    Returns:
+        model: Загруженная модель в режиме eval
+    """
     model = EnhancedTripletNet(base_model_name='vit_base_patch16_224', embedding_dim=512)
     checkpoint = torch.load(model_path, map_location=device)
     
@@ -104,7 +186,19 @@ def load_model(model_path, device):
     return model
 
 
-def get_embedding(image_path, model, transform, device):
+def get_embedding(image_path: str, model: torch.nn.Module, transform, device: torch.device) -> Optional[np.ndarray]:
+    """
+    Получить эмбеддинг изображения через ViT модель.
+    
+    Args:
+        image_path: Путь к изображению
+        model: Загруженная модель
+        transform: Трансформы для предобработки
+        device: Устройство для вычислений
+    
+    Returns:
+        embedding: Вектор размерности (512,), L2 нормализован, или None при ошибке
+    """
     try:
         image = Image.open(image_path).convert('RGB')
         image_tensor = transform(image).unsqueeze(0).to(device)
@@ -116,11 +210,22 @@ def get_embedding(image_path, model, transform, device):
         return None
 
 
-def compute_distances(embeddings1, embedding2):
+def compute_distances(embeddings1: np.ndarray, embedding2: np.ndarray) -> np.ndarray:
+    """
+    Вычислить расстояния между векторами (cosine distance).
+    
+    Args:
+        embeddings1: Массив векторов (n, 512)
+        embedding2: Единичный вектор (512,)
+    
+    Returns:
+        distances: Массив расстояний (n,)
+    """
     similarities = cosine_similarity(embeddings1, embedding2.reshape(1, -1))
     return 1 - similarities.flatten()
 
 
+<<<<<<< HEAD
 def _collect_database_image_paths(database_dir):
     """Собирает все пути к изображениям в базе."""
     image_paths = []
@@ -263,6 +368,203 @@ def find_similar_images(
     force_recompute_cache=False,
 ):
     """Основная функция поиска похожих изображений."""
+=======
+def save_embeddings(embeddings: np.ndarray, paths: List[str], save_path: str):
+    """
+    Сохранить эмбеддинги в pickle (устаревший метод).
+    
+    Args:
+        embeddings: Массив векторов (n, 512)
+        paths: Список путей к изображениям
+        save_path: Путь для сохранения
+    """
+    with open(save_path, 'wb') as f:
+        pickle.dump({'embeddings': embeddings, 'paths': paths}, f)
+
+
+def load_embeddings(save_path: str) -> tuple[np.ndarray, List[str]]:
+    """
+    Загрузить эмбеддинги из pickle (устаревший метод).
+    
+    Args:
+        save_path: Путь к файлу pickle
+    
+    Returns:
+        embeddings: Массив векторов (n, 512)
+        paths: Список путей к изображениям
+    """
+    with open(save_path, 'rb') as f:
+        data = pickle.load(f)
+    return data['embeddings'], data['paths']
+
+
+# ============================================================================
+# ПОИСК (ОБНОВЛЁННЫЙ: FAISS + SQLite)
+# ============================================================================
+
+def get_db_connection(db_path: str = "database/cards.db"):
+    """
+    Получить соединение с базой данных.
+    
+    Args:
+        db_path: Путь к файлу БД
+    
+    Returns:
+        conn: SQLite соединение с row_factory
+    """
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+def get_individual_info(cursor, embedding_index: int) -> Optional[Dict]:
+    """
+    Получить информацию об особи по embedding_index из БД.
+    
+    Args:
+        cursor: Курсор SQLite
+        embedding_index: Позиция вектора в FAISS индексе
+    
+    Returns:
+        dict: Информация об особи (individual_id, species, photo_path) или None
+    """
+    cursor.execute('''
+        SELECT p.photo_id, p.individual_id, p.photo_path,
+               i.species, i.template_type, i.project_name
+        FROM photos p
+        JOIN individuals i ON p.individual_id = i.individual_id
+        WHERE p.embedding_index = ?
+    ''', (embedding_index,))
+    
+    row = cursor.fetchone()
+    if row:
+        return {
+            'photo_id': row['photo_id'],
+            'individual_id': row['individual_id'],
+            'photo_path': row['photo_path'],
+            'species': row['species'],
+            'template_type': row['template_type'],
+            'project_name': row['project_name']
+        }
+    return None
+
+
+def find_similar_images(
+    model_path: str,
+    database_dir: str,
+    query_image_path: str,
+    output_dir: str,
+    transform,  # ← Теперь обязательно используется
+    device: torch.device,
+    size_answer: int = 5
+):
+    """
+    Найти похожих особей по фотографии брюшка.
+    """
+    FAISS_INDEX_PATH = "data/embeddings/database_embeddings.pkl"
+    DB_PATH = "database/cards.db"
+    
+    # 1. Загрузка модели
+    print(f"Загрузка модели: {model_path}")
+    model = load_model(model_path, device)
+    
+    # 2. Загрузка FAISS индекса
+    print(f"Загрузка FAISS индекса: {FAISS_INDEX_PATH}")
+    if not os.path.exists(FAISS_INDEX_PATH):
+        print(f"Ошибка: FAISS индекс не найден: {FAISS_INDEX_PATH}")
+        return []
+    
+    faiss_index = faiss.read_index(FAISS_INDEX_PATH)
+    print(f"Векторов в индексе: {faiss_index.ntotal}")
+    
+    # 3. Получение query embedding
+    print(f"Обработка запроса: {query_image_path}")
+    query_embedding = get_embedding(query_image_path, model, transform, device)
+    if query_embedding is None:
+        print("Не удалось обработать запросное изображение")
+        return []
+    
+    # 4. Поиск в FAISS
+    query_embedding = query_embedding.reshape(1, -1).astype('float32')
+    distances, indices = faiss_index.search(query_embedding, size_answer)
+    
+    # 5. Получение метаданных из БД
+    conn = get_db_connection(DB_PATH)
+    cursor = conn.cursor()
+    
+    results = []
+    print(f"\nТоп-{size_answer} результатов:")
+    
+    os.makedirs(output_dir, exist_ok=True)
+    
+    with open(os.path.join(output_dir, "res.txt"), 'w', encoding='utf-8') as file:
+        for i, (idx, dist) in enumerate(zip(indices[0], distances[0]), 1):
+            if idx == -1:
+                continue
+            
+            info = get_individual_info(cursor, int(idx))
+            if not info:
+                print(f"Предупреждение: embedding_index {idx} не найден в БД")
+                continue
+            
+            src_path = info['photo_path']
+            dst_filename = f"top{i}.jpg"
+            dst_path = os.path.join(output_dir, dst_filename)
+            
+            try:
+                shutil.copy(src_path, dst_path)
+                
+                class_string = 'Ребристый' if info['species'] == 'Гребенчатый' else "Карелина"
+                similarity_percent = dist * 100
+                
+                res_str = f"{i}. Класс: {class_string} | Особь: {info['individual_id']} | Схожесть: {similarity_percent:.1f}%\n"
+                file.write(res_str)
+                print(f"{i}. Класс: {class_string} | Особь: {info['individual_id']} | Схожесть: {similarity_percent:.1f}%")
+                
+                results.append({
+                    'rank': i,
+                    'individual_id': info['individual_id'],
+                    'species': info['species'],
+                    'photo_path': src_path,
+                    'similarity': similarity_percent
+                })
+            except Exception as e:
+                print(f"Ошибка копирования файла {src_path}: {str(e)}")
+    
+    conn.close()
+    print(f"\nРезультаты сохранены в: {output_dir}")
+    return results
+
+
+# ============================================================================
+# УСТАРЕВШАЯ ВЕРСИЯ (для отладки/сравнения)
+# ============================================================================
+
+def find_similar_images_legacy(
+    model_path: str,
+    database_dir: str,
+    query_image_path: str,
+    output_dir: str,
+    transform,
+    device: torch.device,
+    size_answer: int = 5
+):
+    """
+    Устаревшая версия поиска через pickle + sklearn.
+    
+    Используется только для отладки или если FAISS индекс недоступен.
+    Сканирует папки с изображениями вместо использования БД.
+    
+    Args:
+        model_path: Путь к модели ViT
+        database_dir: Папка с изображениями для поиска
+        query_image_path: Путь к запросному изображению
+        output_dir: Папка для результатов
+        transform: Трансформы для предобработки
+        device: Устройство для вычислений
+        size_answer: Количество результатов
+    """
+>>>>>>> origin/main
     embeddings_save_path = os.path.join(database_dir, 'database_embeddings.pkl')
     database_image_paths = _collect_database_image_paths(database_dir)
     
@@ -355,10 +657,17 @@ def find_similar_images(
     print('\n=== Топ результатов ===')
     os.makedirs(output_dir, exist_ok=True)
 
+<<<<<<< HEAD
     with open(os.path.join(output_dir, 'res.txt'), 'w', encoding='utf-8') as file:
         for i, candidate in enumerate(result_candidates, 1):
             src_path = candidate['src_path']
             dst_filename = f'top{i}.jpg'
+=======
+    with open(output_dir + "/res.txt", 'w', encoding='utf-8') as file:
+        for i, idx in enumerate(top5_idx, 1):
+            src_path = database_image_paths[idx]
+            dst_filename = f"top{i}.jpg"
+>>>>>>> origin/main
             dst_path = os.path.join(output_dir, dst_filename)
 
             try:
@@ -374,6 +683,7 @@ def find_similar_images(
                     f'Схожесть: {similarity_percent:.1f}%\n'
                 )
                 file.write(res_str)
+<<<<<<< HEAD
                 print(
                     f'{i}. Класс: {class_name} | Особь: {individual} | '
                     f'Схожесть: {similarity_percent:.1f}% | Путь: {src_path}'
@@ -382,3 +692,54 @@ def find_similar_images(
                 print(f'Ошибка копирования файла {src_path}: {str(e)}')
 
     print(f'\nРезультаты сохранены в: {output_dir}')
+=======
+                print(f"{i}. Класс: {class_name} | Особь: {individual} | Схожесть: {similarity_percent:.1f}% | Путь: {src_path}")
+            except Exception as e:
+                print(f"Ошибка копирования файла {src_path}: {str(e)}")
+    print(f"\nРезультаты сохранены в: {output_dir}")
+
+
+# ============================================================================
+# MAIN (для тестирования)
+# ============================================================================
+
+if __name__ == "__main__":
+    import argparse
+    
+    parser = argparse.ArgumentParser(description="Поиск особей тритонов по кропу брюшка")
+    parser.add_argument("query_image", type=str, help="Путь к изображению")
+    parser.add_argument("--output", type=str, default="data/output/search_results")
+    parser.add_argument("--top-k", type=int, default=5)
+    parser.add_argument("--model", type=str, default="models/best_id.pt")
+    parser.add_argument("--legacy", action="store_true", help="Использовать legacy версию (pickle)")
+    
+    args = parser.parse_args()
+    
+    DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    TRANSFORMS = transforms.Compose([
+        transforms.Resize((224, 224)),
+        transforms.ToTensor(),
+        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+    ])
+    
+    if args.legacy:
+        find_similar_images_legacy(
+            model_path=args.model,
+            database_dir="data/dataset_crop/dataset_crop_24",
+            query_image_path=args.query_image,
+            output_dir=args.output,
+            transform=TRANSFORMS,
+            device=DEVICE,
+            size_answer=args.top_k
+        )
+    else:
+        find_similar_images(
+            model_path=args.model,
+            database_dir="data/dataset_crop/dataset_crop_24",
+            query_image_path=args.query_image,
+            output_dir=args.output,
+            transform=TRANSFORMS,
+            device=DEVICE,
+            size_answer=args.top_k
+        )
+>>>>>>> origin/main
