@@ -13,6 +13,7 @@ from sklearn.metrics.pairwise import cosine_similarity
 from tqdm import tqdm
 from torchvision import transforms
 
+
 class EnhancedTripletNet(nn.Module):
     def __init__(self, base_model_name='vit_base_patch16_224', embedding_dim=512, dropout_rate=0.4):
         super().__init__()
@@ -120,18 +121,8 @@ def compute_distances(embeddings1, embedding2):
     return 1 - similarities.flatten()
 
 
-def _file_sha256(path, chunk_size=1024 * 1024):
-    hasher = hashlib.sha256()
-    with open(path, 'rb') as file_obj:
-        while True:
-            chunk = file_obj.read(chunk_size)
-            if not chunk:
-                break
-            hasher.update(chunk)
-    return hasher.hexdigest()
-
-
 def _collect_database_image_paths(database_dir):
+    """Собирает все пути к изображениям в базе."""
     image_paths = []
     for root, _, files in os.walk(database_dir):
         if any(x in root.lower() for x in ['pycache', '.git', 'results']):
@@ -145,45 +136,20 @@ def _collect_database_image_paths(database_dir):
     return image_paths
 
 
-def _database_signature(image_paths):
-    hasher = hashlib.sha256()
-    hasher.update(str(len(image_paths)).encode('utf-8'))
-    for path in image_paths:
-        hasher.update(path.encode('utf-8'))
-        try:
-            mtime = os.path.getmtime(path)
-            hasher.update(str(mtime).encode('utf-8'))
-        except OSError:
-            continue
-    return hasher.hexdigest()
-
-
-def _transform_signature(transform):
-    return hashlib.sha256(str(transform).encode('utf-8')).hexdigest()
-
-
-def _build_cache_metadata(model_path, database_paths, transform):
-    return {
-        'model_hash': _file_sha256(model_path),
-        'database_signature': _database_signature(database_paths),
-        'transform_signature': _transform_signature(transform),
-        'num_images': len(database_paths),
-    }
-
-
-def _save_embeddings_with_metadata(embeddings, paths, save_path, metadata):
+def _save_embeddings(embeddings, paths, save_path):
+    """Сохраняет эмбеддинги и пути в файл."""
     with open(save_path, 'wb') as file_obj:
         pickle.dump({
             'embeddings': embeddings,
             'paths': paths,
-            'metadata': metadata,
         }, file_obj)
 
 
-def _load_embeddings_with_metadata(save_path):
+def _load_embeddings(save_path):
+    """Загружает эмбеддинги и пути из файла."""
     with open(save_path, 'rb') as file_obj:
         data = pickle.load(file_obj)
-    return data['embeddings'], data['paths'], data.get('metadata')
+    return data['embeddings'], data['paths']
 
 
 def extract_metadata_from_path(image_path):
@@ -270,6 +236,7 @@ def save_vit_debug_report(query_image_path, database_image_paths, distances, out
 
 
 def compute_database_embeddings_with_paths(model, database_image_paths, transform, device):
+    """Вычисляет эмбеддинги для всех изображений базы."""
     database_embeddings = []
     valid_paths = []
     for path in tqdm(database_image_paths, desc='Обработка базы'):
@@ -292,16 +259,16 @@ def find_similar_images(
     transform,
     device,
     size_answer,
-    search_mode='by_individual',  # Новый параметр: 'by_individual' или 'by_image'
+    search_mode='by_individual',
     force_recompute_cache=False,
 ):
+    """Основная функция поиска похожих изображений."""
     embeddings_save_path = os.path.join(database_dir, 'database_embeddings.pkl')
     database_image_paths = _collect_database_image_paths(database_dir)
-    current_metadata = _build_cache_metadata(model_path, database_image_paths, transform)
     
     use_cache = False
     
-    # Управление кэшем
+    # Управление кэшем (упрощённое — только по существованию файла)
     if force_recompute_cache and os.path.exists(embeddings_save_path):
         try:
             os.remove(embeddings_save_path)
@@ -310,17 +277,11 @@ def find_similar_images(
             print(f'Не удалось удалить кэш эмбеддингов: {error}')
 
     if os.path.exists(embeddings_save_path):
-        print('Найден кэш эмбеддингов, проверяем актуальность...')
+        print('Найден кэш эмбеддингов, используем его')
         try:
-            database_embeddings, cached_paths, cached_metadata = _load_embeddings_with_metadata(
-                embeddings_save_path
-            )
-            if cached_metadata == current_metadata and len(cached_paths) == len(database_image_paths):
-                print('Кэш эмбеддингов актуален, используем его')
-                database_image_paths = cached_paths
-                use_cache = True
-            else:
-                print('Кэш эмбеддингов устарел, пересчитываем...')
+            database_embeddings, cached_paths = _load_embeddings(embeddings_save_path)
+            database_image_paths = cached_paths
+            use_cache = True
         except Exception as error:
             print(f'Не удалось прочитать кэш эмбеддингов: {error}. Пересчитываем...')
 
@@ -334,12 +295,10 @@ def find_similar_images(
             transform,
             device,
         )
-        current_metadata = _build_cache_metadata(model_path, valid_paths, transform)
-        _save_embeddings_with_metadata(
+        _save_embeddings(
             database_embeddings,
             valid_paths,
             embeddings_save_path,
-            current_metadata,
         )
         print(f'Эмбеддинги сохранены в {embeddings_save_path}')
         database_image_paths = valid_paths
