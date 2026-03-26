@@ -40,5 +40,9 @@ keypoints_01_12_2025/
 yolo11s_seg_23_12/
 yolo11s_seg_last/
 
+# Database
+*.db
+
 # Optional local docs/attachments
 *.pdf
+test.py

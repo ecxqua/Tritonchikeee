@@ -14,3 +14,6 @@ scikit-image==0.25.2
 pytest
 hypothesis
 pyyaml==6.0.3
+faiss-cpu>=1.7.4
+exifread>=3.0.0
+gdown==5.2.1
