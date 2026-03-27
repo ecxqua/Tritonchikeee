@@ -3,9 +3,12 @@ import torch
 import yaml
 import asyncio
 from torchvision import transforms
-from .deployment_yolo_new import process_single_image
-from .deployment_vit import find_similar_images
-from .save_new import save_new_individual
+from pipeline.deployment_vit import load_model, get_embedding, find_similar_in_database
+from pipeline.save_new import save_new_individual, add_encounter, generate_card_id
+from pipeline.deployment_yolo_new import process_single_image
+from database.card_database import DB_PATH
+import sqlite3
+import numpy as np
 
 
 # Загрузка конфигураций
@@ -20,17 +23,32 @@ def load_config(config_path="config/config.yaml"):
         )
 
 
+# ============================================================================
+# ВСПОМОГАТЕЛЬНАЯ ФУНКЦИЯ: Трансформы для ViT
+# ============================================================================
+def get_vit_transforms():
+    """Создаёт трансформы для предобработки изображений (как в deployment_vit.py)"""
+    return transforms.Compose([
+        transforms.Resize((224, 224)),
+        transforms.ToTensor(),
+        transforms.Normalize(
+            mean=[0.485, 0.456, 0.406],
+            std=[0.229, 0.224, 0.225]
+        ),
+    ])
+
+
+# ============================================================================
+# ОБРАБОТКА ФОТО (исправленная версия)
+# ============================================================================
 async def photo_processing(config, filepath):
     """
-    Основная функция обработки фотографии
-
-    Процесс состоит из двух этапов:
-    1) Обработка YOLO моделью для детекции и обрезки брюшка тритона.
-    2) Поиск похожих изображений с помощью ViT модели.
+    Обрабатывает фото и возвращает результат для РУЧНОЙ проверки биологом.
+    
+    ⚠️ ВАЖНО: Никогда не принимает решения автоматически!
     """
     try:
-        # Вызываем YOLO модель для детекции и обрезки брюшка тритона
-        # Функция сохраняет обрезанное изображение как image_cropped.jpg
+        # === 1. YOLO: Обработка изображения ===
         success = await process_single_image(
             filepath,
             config["io"]["output_folder"],
@@ -39,59 +57,49 @@ async def photo_processing(config, filepath):
             config["seg-model"]["final_size"],
             config["seg-model"]["path"],
         )
-
-        # Если YOLO успешно обработал изображение, переходим к поиску похожих
-        if success:
-            # Поиск схлжих фото с помощью ViT
-
-            # Путь к обученной ViT модели
-            MODEL_PATH = config["id-model"]["path"]
-
-            # Директория с базой данных изображений для поиска
-            DATABASE_DIR = config["db"]["path"]
-
-            # Путь к обрезанному изображению от YOLO
-            QUERY_IMAGE = f'{config["io"]["output_folder"]}/image_cropped.jpg'
-
-            # Директория для сохранения результатов
-            OUTPUT_DIR = config["io"]["output_folder"]
-
-            # Размер ответа для топ-5 (legacy тг-бота)
-            SIZE_ANSWER = config["view"]["size_answer"]
-
-            DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-            # Трансформации для предобработки изображений
-            TRANSFORMS = transforms.Compose(
-                [
-                    transforms.Resize((224, 224)),
-                    transforms.ToTensor(),
-                    transforms.Normalize(
-                        mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]
-                    ),
-                ]
-            )
-
-            # Вызываем функцию поиска похожих изображений
-            find_similar_images(
-                model_path=MODEL_PATH,  # Путь к модели
-                database_dir=DATABASE_DIR,  # База данных для поиска
-                query_image_path=QUERY_IMAGE,  # Запрашиваемое изображение
-                output_dir=OUTPUT_DIR,  # Куда сохранять результаты
-                transform=TRANSFORMS,
-                device=DEVICE,
-                size_answer=SIZE_ANSWER,
-            )
-            return True
-
-        # Если YOLO не смог обработать изображение
-        return False
-
+        if not success:
+            return {"status": "error", "message": "YOLO не смог обработать изображение"}
+        
+        # === 2. ViT: Генерация эмбеддинга ===
+        cropped_path = f'{config["io"]["output_folder"]}/image_cropped.jpg'
+        model_path = config["id-model"]["path"]
+        
+        # 🔥 ОПРЕДЕЛЯЕМ device
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        
+        # 🔥 ОПРЕДЕЛЯЕМ трансформы
+        TRANSFORMS = get_vit_transforms()
+        
+        # 🔥 ЗАГРУЖАЕМ модель
+        model = load_model(model_path, device)
+        
+        # 🔥 ГЕНЕРИРУЕМ эмбеддинг
+        embedding = get_embedding(cropped_path, model, TRANSFORMS, device)
+        if embedding is None:
+            return {"status": "error", "message": "Не удалось сгенерировать эмбеддинг"}
+        
+        # === 3. 🔥 НОВЫЙ ПОИСК: FAISS + SQLite ===
+        matches = find_similar_in_database(
+            query_embedding=embedding,
+            db_path="database/cards.db",
+            faiss_index_path="data/embeddings/database_embeddings.pkl",
+            top_k=5
+        )
+        
+        # === 4. 🔥 ВСЕГДА возвращаем на ручную проверку ===
+        return {
+            "status": "review_required",  # ← НИКОГДА не "auto_add"
+            "matches": matches,           # ← Топ-5 совпадений из БД
+            "embedding": embedding,       # ← Для сохранения
+            "cropped_path": cropped_path, # ← Путь к кропу
+            "full_path": filepath,        # ← Путь к полному фото
+            "message": "Требуется ручная проверка биологом"
+        }
+        
     except Exception as e:
-        print(f"Ошибка при обработке: {str(e)}")
-
-        return False
-
+        import traceback
+        traceback.print_exc()
+        return {"status": "error", "message": str(e)}
 
 def save_new_person(
     embedding, 
@@ -120,6 +128,27 @@ def save_new_person(
     )
     return individual_id
 
+def add_repeat_encounter(
+    individual_id: str,
+    embedding: np.ndarray,
+    photo_path_full: str,
+    photo_path_cropped: str,
+    template_type: str = "КВ-1",
+    **card_data
+):
+    """
+    Вызывается, когда биолог подтвердил: "это та же особь, новая встреча".
+    """
+    photo_number = add_encounter(
+        individual_id=individual_id,
+        template_type=template_type,
+        photo_path_full=photo_path_full,
+        photo_path_cropped=photo_path_cropped,
+        embedding=embedding,
+        date=datetime.now().strftime("%d.%m.%Y"),
+        **card_data
+    )
+    return photo_number
 
 if __name__ == "__main__":
     asyncio.run(photo_processing(load_config(), "data/input/image.png"))

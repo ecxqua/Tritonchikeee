@@ -11,7 +11,7 @@ class TritonMaskUnwrapper:
         trim_top_pct=0.3,
         trim_bottom_pct=0.15,
         final_size=244,
-        seg_model_path="bot/models/best.pt"
+        seg_model_path="bot/models/best_seg.pt"
     ):
         """
         Инициализация модели сегментации для развертки брюшка тритона

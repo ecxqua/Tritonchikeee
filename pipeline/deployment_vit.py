@@ -15,6 +15,7 @@ from torchvision import transforms
 from typing import Optional, List, Dict
 import sqlite3
 import faiss
+from pathlib import Path
 
 
 # ============================================================================
@@ -573,4 +574,82 @@ def find_similar_images(
                 print(f'Ошибка копирования файла {src_path}: {str(e)}')
 
     print(f'\nРезультаты сохранены в: {output_dir}')
+
+# НОВАЯ ФУНКЦИЯ в deployment_vit.py
+def find_similar_in_database(
+    query_embedding: np.ndarray,
+    db_path: str = "database/cards.db",
+    faiss_index_path: str = "data/embeddings/database_embeddings.pkl",
+    top_k: int = 5
+) -> list:
+    """
+    Ищет похожих особей через FAISS + возвращает данные из SQLite.
+    
+    Args:
+        query_embedding: Вектор запроса (512,), L2 нормализован
+        db_path: Путь к SQLite базе
+        faiss_index_path: Путь к FAISS индексу
+        top_k: Количество результатов
+    
+    Returns:
+        List[dict]: [
+            {
+                "individual_id": "NT-K-24-ИК1",
+                "score": 0.872,
+                "photo_path": "data/...",
+                "species": "Карелина",
+                "template_type": "ИК-1",
+                "embedding_index": 147
+            },
+            ...
+        ]
+    """
+
+    
+    # 1. Загружаем FAISS индекс
+    if not Path(faiss_index_path).exists():
+        print(f"⚠️ FAISS индекс не найден: {faiss_index_path}")
+        return []
+    
+    faiss_index = faiss.read_index(str(faiss_index_path))
+    
+    # 2. Поиск ближайших соседей (Inner Product для нормализованных векторов)
+    query = np.array([query_embedding]).astype('float32')
+    distances, indices = faiss_index.search(query, top_k)
+    
+    # 3. Получаем данные из SQLite по embedding_index
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    
+    results = []
+    for idx, dist in zip(indices[0], distances[0]):
+        if idx == -1 or idx < 0:  # FAISS вернул пустой результат
+            continue
+            
+        # similarity = 1 - distance (для Inner Product с нормализованными векторами)
+        similarity = 1 - dist
+        
+        cursor.execute('''
+            SELECT p.individual_id, p.photo_path, p.embedding_index,
+                   i.species, i.template_type, i.project_name
+            FROM photos p
+            JOIN individuals i ON p.individual_id = i.individual_id
+            WHERE p.embedding_index = ? AND p.is_processed = 1
+        ''', (int(idx),))
+        
+        row = cursor.fetchone()
+        if row:
+            results.append({
+                "individual_id": row["individual_id"],
+                "photo_path": row["photo_path"],
+                "embedding_index": row["embedding_index"],
+                "species": row["species"],
+                "template_type": row["template_type"],
+                "project_name": row["project_name"],
+                "score": float(similarity)
+            })
+    
+    conn.close()
+    return results
     
