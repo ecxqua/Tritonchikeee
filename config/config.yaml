@@ -1,7 +1,9 @@
+# Внимание: io-раздел отведён чисто под тестирование.
+# API обращается по любым аргументам.
 io:
   input_folder: "data/input/" # Папка для входных фото
   image_name: "image.jpg"
-  output_folder: "data/output" # Папка для результатов и артефактов
+  output_folder: "data/output/" # Папка для результатов и артефактов
 
 models:
   path: "models/"
@@ -24,6 +26,7 @@ id-model:
 db:
   db_path: "database/cards.db"
   faiss_index_path: "data/embeddings/database_embeddings.pkl"
+  cropped_folder: "data/cropped/"
 
 view:
   size_answer: 20  # Размер рейтинга
