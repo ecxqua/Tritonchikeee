@@ -1,25 +1,49 @@
-import hashlib
+"""
+deployment_vit.py — Поиск похожих особей тритонов (ViT + FAISS + SQLite)
+
+Версия: 2.2
+Интеграция: FAISS индекс + SQLite база данных + прототипы на лету
+
+Зависимости:
+    - database/cards.db — SQLite база с таблицами individuals, photos
+    - data/embeddings/database_embeddings.pkl — FAISS индекс (512 dim, L2 norm)
+    - models/best_model.pth — веса модели EnhancedTripletNet
+"""
+
 import os
-import pickle
 import shutil
 import csv
+import sqlite3
+from pathlib import Path
+from typing import Optional, List, Dict, Any
+
 import numpy as np
 import timm
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from PIL import Image
-from sklearn.metrics.pairwise import cosine_similarity
-from tqdm import tqdm
-from torchvision import transforms
-from typing import Optional, List, Dict
-import sqlite3
 import faiss
+from PIL import Image
+from torchvision import transforms
 
 
-# ============================================================================
-# МОДЕЛЬ
-# ============================================================================
+# =============================================================================
+# КОНСТАНТЫ
+# =============================================================================
+
+DEFAULT_TRANSFORM = transforms.Compose([
+    transforms.Resize((224, 224)),
+    transforms.ToTensor(),
+    transforms.Normalize(
+        mean=[0.485, 0.456, 0.406],
+        std=[0.229, 0.224, 0.225]
+    )
+])
+
+
+# =============================================================================
+# МОДЕЛЬ (БЕЗ ИЗМЕНЕНИЙ — СОВМЕСТИМОСТЬ С ML КОМАНДОЙ)
+# =============================================================================
 
 class EnhancedTripletNet(nn.Module):
     """
@@ -27,27 +51,20 @@ class EnhancedTripletNet(nn.Module):
     
     Архитектура:
         - Base: ViT-B/16 (pretrained)
-        - Embedding head: 1024 -> 512 -> 512 (с нормализацией)
+        - Embedding head: 1024 -> 512 -> 512 (с L2 нормализацией)
         - Projection head: 512 -> 256 -> 128 (для triplet loss)
-    
+
     Args:
-        base_model_name: Название модели timm
-        embedding_dim: Размерность выходного эмбеддинга
-        dropout_rate: Коэффициент dropout
+        base_model_name: Название модели timm (по умолчанию 'vit_base_patch16_224')
+        embedding_dim: Размерность выходного эмбеддинга (по умолчанию 512)
+        dropout_rate: Коэффициент dropout (по умолчанию 0.4)
+
+    Returns:
+        torch.Tensor: Нормализованный вектор эмбеддинга (batch, 512)
     """
-    
-    def __init__(self, base_model_name='vit_base_patch16_224', embedding_dim=512, dropout_rate=0.4):
-        """
-        Инициализация модели EnhancedTripletNet.
-        
-        Загружает базовую модель ViT, настраивает голову эмбеддинга и проекции,
-        а также управляет заморозкой/разморозкой слоев базовой модели.
-        
-        Args:
-            base_model_name (str): Название архитектуры модели из библиотеки timm.
-            embedding_dim (int): Размерность выходного вектора эмбеддинга.
-            dropout_rate (float): Вероятность обнуления элементов для регуляризации.
-        """
+
+    def __init__(self, base_model_name: str = 'vit_base_patch16_224',
+                 embedding_dim: int = 512, dropout_rate: float = 0.4):
         super().__init__()
         self.base_model = timm.create_model(base_model_name, pretrained=True)
         in_features = self.base_model.head.in_features
@@ -99,18 +116,17 @@ class EnhancedTripletNet(nn.Module):
                 if module.bias is not None:
                     nn.init.constant_(module.bias, 0)
 
-    def forward(self, x, return_projection=False):
+    def forward(self, x: torch.Tensor, return_projection: bool = False) -> torch.Tensor:
         """
         Прямой проход через модель.
-        
+
         Args:
-            x (torch.Tensor): Входное изображение (batch, 3, 224, 224).
-            return_projection (bool): Вернуть ли output проекционной головки.
-        
+            x: Входное изображение (batch, 3, 224, 224)
+            return_projection: Вернуть ли output проекционной головки
+
         Returns:
-            torch.Tensor: 
-                Если return_projection=False: Нормализованный вектор эмбеддинга (batch, 512).
-                Если return_projection=True: Кортеж (embeddings, projections), где projections (batch, 128).
+            Если return_projection=False: Нормализованный вектор (batch, 512)
+            Если return_projection=True: Кортеж (embeddings, projections)
         """
         features = self.base_model(x)
         embeddings = self.embedding(features)
@@ -124,24 +140,27 @@ class EnhancedTripletNet(nn.Module):
         return embeddings
 
 
-# ============================================================================
-# ФУНКЦИИ ЗАГРУЗКИ И ОБРАБОТКИ
-# ============================================================================
+# =============================================================================
+# ФУНКЦИИ ЗАГРУЗКИ МОДЕЛИ И ЭМБЕДДИНГОВ
+# =============================================================================
 
-def load_model(model_path: str, device: torch.device) -> torch.nn.Module:
+def load_model(model_path: str, device: torch.device) -> nn.Module:
     """
     Загрузить модель ViT для идентификации.
-    
+
     Args:
-        model_path (str): Путь к файлу весов (.pt).
-        device (torch.device): Устройство для вычислений (cuda/cpu).
-    
+        model_path: Путь к файлу весов (.pt)
+        device: Устройство для вычислений (cuda/cpu)
+
     Returns:
-        torch.nn.Module: Загруженная модель в режиме eval.
+        Загруженная модель в режиме eval
     """
-    model = EnhancedTripletNet(base_model_name='vit_base_patch16_224', embedding_dim=512)
-    checkpoint = torch.load(model_path, map_location=device)
-    
+    model = EnhancedTripletNet(
+        base_model_name='vit_base_patch16_224',
+        embedding_dim=512
+    )
+    checkpoint = torch.load(model_path, map_location=device, weights_only=False)
+
     if isinstance(checkpoint, dict) and 'model_state_dict' in checkpoint:
         state_dict = checkpoint['model_state_dict']
     else:
@@ -153,8 +172,6 @@ def load_model(model_path: str, device: torch.device) -> torch.nn.Module:
     for k, v in state_dict.items():
         if k in model_state_dict and v.shape == model_state_dict[k].shape:
             filtered_state_dict[k] = v
-        else:
-            print(f"Пропущен ключ {k} (несовпадение формы или имени)")
 
     model.load_state_dict(filtered_state_dict, strict=False)
     model.to(device)
@@ -162,18 +179,20 @@ def load_model(model_path: str, device: torch.device) -> torch.nn.Module:
     return model
 
 
-def get_embedding(image_path: str, model: torch.nn.Module, transform, device: torch.device) -> Optional[np.ndarray]:
+def get_embedding(image_path: str, model: nn.Module,
+                  transform: transforms.Compose,
+                  device: torch.device) -> Optional[np.ndarray]:
     """
     Получить эмбеддинг изображения через ViT модель.
-    
+
     Args:
-        image_path (str): Путь к изображению.
-        model (torch.nn.Module): Загруженная модель.
-        transform (torchvision.transforms): Трансформы для предобработки.
-        device (torch.device): Устройство для вычислений.
-    
+        image_path: Путь к изображению
+        model: Загруженная модель
+        transform: Трансформы для предобработки
+        device: Устройство для вычислений
+
     Returns:
-        Optional[np.ndarray]: Вектор размерности (512,), L2 нормализован, или None при ошибке.
+        Вектор размерности (512,), L2 нормализован, или None при ошибке
     """
     try:
         image = Image.open(image_path).convert('RGB')
@@ -186,391 +205,381 @@ def get_embedding(image_path: str, model: torch.nn.Module, transform, device: to
         return None
 
 
-def compute_distances(embeddings1: np.ndarray, embedding2: np.ndarray) -> np.ndarray:
+# =============================================================================
+# ФУНКЦИИ ДЛЯ РАБОТЫ С FAISS + SQLite
+# =============================================================================
+
+def get_db_connection(db_path: str) -> sqlite3.Connection:
     """
-    Вычислить расстояния между векторами (cosine distance).
-    
+    Получить соединение с SQLite базой данных.
+
     Args:
-        embeddings1 (np.ndarray): Массив векторов (n, 512).
-        embedding2 (np.ndarray): Единичный вектор (512,).
-    
+        db_path: Путь к файлу базы данных
+
     Returns:
-        np.ndarray: Массив расстояний (n,), где расстояние = 1 - cosine_similarity.
+        sqlite3.Connection с row_factory=sqlite3.Row
     """
-    similarities = cosine_similarity(embeddings1, embedding2.reshape(1, -1))
-    return 1 - similarities.flatten()
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    return conn
 
 
-def _collect_database_image_paths(database_dir: str) -> List[str]:
+def load_faiss_index(faiss_index_path: str) -> faiss.Index:
     """
-    Собирает все пути к изображениям в базе данных рекурсивно.
-    
-    Игнорирует системные папки (pycache, .git, results) и фильтрует по расширениям.
-    
+    Загрузить FAISS индекс из файла.
+
     Args:
-        database_dir (str): Корневая директория базы изображений.
-    
+        faiss_index_path: Путь к файлу индекса (.pkl)
+
     Returns:
-        List[str]: Отсортированный список полных путей к изображениям.
-    """
-    image_paths = []
-    for root, _, files in os.walk(database_dir):
-        if any(x in root.lower() for x in ['pycache', '.git', 'results']):
-            continue
-        for file in files:
-            if file.lower().endswith(('.jpg', '.jpeg', '.png', '.bmp', '.tiff')):
-                full_path = os.path.join(root, file)
-                if os.path.exists(full_path):
-                    image_paths.append(full_path)
-    image_paths.sort()
-    return image_paths
+        faiss.Index с векторами эмбеддингов
 
-
-def _save_embeddings(embeddings: np.ndarray, paths: List[str], save_path: str) -> None:
+    Raises:
+        FileNotFoundError: Если индекс не найден
     """
-    Сохраняет эмбеддинги и соответствующие пути к файлам в бинарный файл (pickle).
+    path = Path(faiss_index_path)
+    if not path.exists():
+        raise FileNotFoundError(f"FAISS индекс не найден: {path}")
     
+    index = faiss.read_index(str(path))
+    return index
+
+
+def get_individual_prototypes_on_the_fly(
+    conn: sqlite3.Connection,
+    faiss_index: faiss.Index,
+    embedding_dim: int = 512
+) -> Dict[str, Any]:
+    """
+    Построить прототипы особей (средние эмбеддинги) НА ЛЕТУ из базы данных.
+
+    КЛЮЧЕВАЯ ФУНКЦИЯ: Вычисляет средний эмбеддинг для каждой особи
+    на основе всех её фотографий в момент вызова (не кэшируется).
+
+    ЛОГИКА:
+        1. Получаем все фото с embedding_index != -1 из SQLite
+        2. Группируем по individual_id
+        3. Для каждой особи извлекаем векторы из FAISS по embedding_index
+        4. Вычисляем средний эмбеддинг (прототип) с L2 нормализацией
+        5. Находим наиболее репрезентативное фото (ближайшее к прототипу)
+
     Args:
-        embeddings (np.ndarray): Массив эмбеддингов.
-        paths (List[str]): Список путей к изображениям.
-        save_path (str): Путь для сохранения файла .pkl.
-    
+        conn: Соединение с SQLite
+        faiss_index: FAISS индекс с векторами
+        embedding_dim: Размерность вектора (по умолчанию 512)
+
     Returns:
-        None
+        Словарь с ключами:
+            - 'individual_ids': список ID особей
+            - 'embeddings': массив прототипов (n_individuals, 512)
+            - 'representative_photo_ids': индексы лучших фото для каждой особи
+            - 'member_photo_indices': dict {individual_id: [embedding_indices]}
+            - 'metadata': dict {individual_id: {species, template_type, ...}}
     """
-    with open(save_path, 'wb') as file_obj:
-        pickle.dump({
-            'embeddings': embeddings,
-            'paths': paths,
-        }, file_obj)
+    cursor = conn.cursor()
 
+    # Получаем все фото с эмбеддингами (cropped, с вычисленным вектором)
+    cursor.execute('''
+        SELECT photo_id, individual_id, embedding_index, photo_path
+        FROM photos
+        WHERE embedding_index != -1
+        AND photo_type = 'cropped'
+        ORDER BY individual_id, photo_id
+    ''')
 
-def _load_embeddings(save_path: str) -> tuple:
-    """
-    Загружает эмбеддинги и пути из бинарного файла (pickle).
-    
-    Args:
-        save_path (str): Путь к файлу .pkl.
-    
-    Returns:
-        tuple: Кортеж (embeddings, paths).
-    """
-    with open(save_path, 'rb') as file_obj:
-        data = pickle.load(file_obj)
-    return data['embeddings'], data['paths']
+    rows = cursor.fetchall()
+    if not rows:
+        raise ValueError("В базе нет фото с эмбеддингами")
 
+    # Группируем по особям
+    groups: Dict[str, List[Dict]] = {}
+    for row in rows:
+        ind_id = row['individual_id']
+        if ind_id not in groups:
+            groups[ind_id] = []
+        groups[ind_id].append({
+            'photo_id': row['photo_id'],
+            'embedding_index': row['embedding_index'],
+            'photo_path': row['photo_path']
+        })
 
-def extract_metadata_from_path(image_path: str) -> tuple:
-    """
-    Извлекает имя класса и особи из пути к файлу на основе структуры директорий.
-    
-    Ожидается структура: .../class_name/individual_name/filename.ext
-    
-    Args:
-        image_path (str): Полный путь к изображению.
-    
-    Returns:
-        tuple: (class_name, individual).
-    """
-    class_name = os.path.basename(os.path.dirname(os.path.dirname(image_path)))
-    individual = os.path.basename(os.path.dirname(image_path))
-    return class_name, individual
+    # Получаем метаданные особей
+    cursor.execute('''
+        SELECT individual_id, species, template_type, project_name
+        FROM individuals
+    ''')
+    metadata = {row['individual_id']: dict(row) for row in cursor.fetchall()}
 
-
-def _l2_normalize_np(vector: np.ndarray) -> np.ndarray:
-    """
-    Выполняет L2 нормализацию для numpy вектора.
-    
-    Args:
-        vector (np.ndarray): Входной вектор.
-    
-    Returns:
-        np.ndarray: Нормализованный вектор. Если норма близка к нулю, возвращается исходный вектор.
-    """
-    norm = np.linalg.norm(vector)
-    if norm < 1e-12:
-        return vector
-    return vector / norm
-
-
-def _build_individual_prototypes(database_embeddings: np.ndarray, database_image_paths: List[str]) -> Dict:
-    """
-    Формирует прототип (средний L2-нормированный эмбеддинг) для каждой особи.
-    
-    Группирует эмбеддинги по особи, вычисляет среднее значение и находит
-    наиболее репрезентативное изображение (ближайшее к прототипу).
-    
-    Args:
-        database_embeddings (np.ndarray): Массив всех эмбеддингов базы.
-        database_image_paths (List[str]): Список путей к изображениям базы.
-    
-    Returns:
-        Dict: Словарь, содержащий:
-            - 'keys': Список кортежей (class_name, individual).
-            - 'embeddings': Массив эмбеддингов прототипов.
-            - 'representative_indices': Индексы лучших изображений для каждого прототипа.
-            - 'member_indices': Словарь соответствия особей и индексов их изображений.
-    """
-    groups = {}
-    for idx, path in enumerate(database_image_paths):
-        class_name, individual = extract_metadata_from_path(path)
-        key = (class_name, individual)
-        if key not in groups:
-            groups[key] = []
-        groups[key].append(idx)
-
-    prototype_keys = []
+    # Вычисляем прототипы НА ЛЕТУ
+    individual_ids = []
     prototype_embeddings = []
-    representative_indices = []
+    representative_photo_ids = []
+    member_photo_indices = {}
 
-    for key, indices in groups.items():
-        emb_stack = database_embeddings[indices]
-        # Усредняем и нормализуем
-        prototype = _l2_normalize_np(np.mean(emb_stack, axis=0))
+    for ind_id, photos in groups.items():
+        # Получаем все эмбеддинги особи из FAISS по embedding_index
+        indices = [p['embedding_index'] for p in photos]
+        embeddings_list = []
+        for idx in indices:
+            emb = faiss_index.reconstruct(idx)
+            embeddings_list.append(emb)
 
-        # Находим репрезентативный кадр (ближайший к прототипу)
-        dists_to_proto = compute_distances(emb_stack, prototype)
-        rep_local_idx = int(np.argmin(dists_to_proto))
-        rep_global_idx = indices[rep_local_idx]
+        embeddings_array = np.array(embeddings_list)
 
-        prototype_keys.append(key)
+        # СРЕДНИЙ ЭМБЕДДИНГ (ПРОТОТИП)
+        prototype = np.mean(embeddings_array, axis=0)
+        # L2 нормализация прототипа
+        norm = np.linalg.norm(prototype)
+        if norm > 1e-12:
+            prototype = prototype / norm
+
+        # Находим фото, наиболее близкое к прототипу (для отображения)
+        similarities = np.dot(embeddings_array, prototype)
+        best_local_idx = int(np.argmax(similarities))
+        best_photo = photos[best_local_idx]
+
+        individual_ids.append(ind_id)
         prototype_embeddings.append(prototype)
-        representative_indices.append(rep_global_idx)
+        representative_photo_ids.append(best_photo['photo_id'])
+        member_photo_indices[ind_id] = indices
 
     return {
-        'keys': prototype_keys,
+        'individual_ids': individual_ids,
         'embeddings': np.array(prototype_embeddings),
-        'representative_indices': representative_indices,
-        'member_indices': groups,
+        'representative_photo_ids': representative_photo_ids,
+        'member_photo_indices': member_photo_indices,
+        'metadata': metadata,
     }
 
 
-def save_vit_debug_report(query_image_path: str, database_image_paths: List[str], 
-                          distances: np.ndarray, output_dir: str, top_k: int = 20) -> None:
+def search_with_faiss(
+    query_embedding: np.ndarray,
+    prototypes: Dict[str, Any],
+    top_k: int = 5
+) -> List[Dict[str, Any]]:
     """
-    Сохраняет отладочный отчет о поиске в форматах CSV и TXT.
-    
+    Поиск наиболее похожих особей через FAISS (по прототипам).
+
     Args:
-        query_image_path (str): Путь к изображению запроса.
-        database_image_paths (List[str]): Список путей к изображениям базы.
-        distances (np.ndarray): Массив расстояний от запроса до базы.
-        output_dir (str): Директория для сохранения отчетов.
-        top_k (int): Количество лучших совпадений для записи в отчет.
-    
+        query_embedding: Эмбеддинг запроса (512,)
+        prototypes: Прототипы особей из get_individual_prototypes_on_the_fly()
+        top_k: Количество результатов
+
     Returns:
-        None
+        Список словарей с результатами поиска
+    """
+    query_vector = query_embedding.reshape(1, -1).astype('float32')
+    prototype_embeddings = prototypes['embeddings'].astype('float32')
+
+    # Создаём временный индекс для поиска по прототипам
+    # IndexFlatIP = Inner Product (косинусное сходство для L2 нормализованных векторов)
+    temp_index = faiss.IndexFlatIP(prototype_embeddings.shape[1])
+    temp_index.add(prototype_embeddings)
+    
+    distances, indices = temp_index.search(query_vector, top_k)
+
+    results = []
+    for i, (dist, idx) in enumerate(zip(distances[0], indices[0])):
+        if idx >= len(prototypes['individual_ids']):
+            continue
+
+        ind_id = prototypes['individual_ids'][idx]
+        metadata = prototypes['metadata'].get(ind_id, {})
+        photo_id = prototypes['representative_photo_ids'][idx]
+
+        # Similarity = cosine similarity (т.к. векторы L2 нормализованы)
+        similarity = float(dist)
+        similarity_percent = similarity * 100
+
+        results.append({
+            'rank': i + 1,
+            'individual_id': ind_id,
+            'species': metadata.get('species', 'Unknown'),
+            'template_type': metadata.get('template_type', 'Unknown'),
+            'photo_id': photo_id,
+            'similarity': similarity,
+            'similarity_percent': similarity_percent,
+            'distance': 1 - similarity,
+        })
+
+    return results
+
+
+def get_photo_path_from_db(conn: sqlite3.Connection, photo_id: int) -> Optional[str]:
+    """
+    Получить путь к фото по photo_id из базы данных.
+
+    Args:
+        conn: Соединение с SQLite
+        photo_id: ID фотографии
+
+    Returns:
+        Путь к файлу или None
+    """
+    cursor = conn.cursor()
+    cursor.execute("SELECT photo_path FROM photos WHERE photo_id = ?", (photo_id,))
+    row = cursor.fetchone()
+    return row['photo_path'] if row else None
+
+
+# =============================================================================
+# ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
+# =============================================================================
+
+def save_vit_debug_report(
+    query_image_path: str,
+    results: List[Dict[str, Any]],
+    output_dir: str
+) -> None:
+    """
+    Сохраняет отладочный отчёт о поиске в форматах CSV и TXT.
+
+    Args:
+        query_image_path: Путь к изображению запроса
+        results: Результаты поиска от search_with_faiss()
+        output_dir: Директория для сохранения отчётов
     """
     os.makedirs(output_dir, exist_ok=True)
-    sorted_idx = np.argsort(distances)
-    top_k = min(top_k, len(sorted_idx))
 
     csv_path = os.path.join(output_dir, 'vit_debug_topk.csv')
     with open(csv_path, 'w', newline='', encoding='utf-8') as csv_file:
         writer = csv.writer(csv_file)
-        writer.writerow(['rank', 'similarity_percent', 'distance', 'class_name', 'individual', 'image_path'])
-
-        for rank, idx in enumerate(sorted_idx[:top_k], 1):
-            src_path = database_image_paths[idx]
-            class_name, individual = extract_metadata_from_path(src_path)
-            similarity = (1 - distances[idx]) * 100
+        writer.writerow([
+            'rank', 'similarity_percent', 'distance',
+            'individual_id', 'species', 'template_type', 'photo_id'
+        ])
+        for r in results:
             writer.writerow([
-                rank,
-                round(float(similarity), 3),
-                round(float(distances[idx]), 6),
-                class_name,
-                individual,
-                src_path,
+                r['rank'],
+                round(r['similarity_percent'], 3),
+                round(r['distance'], 6),
+                r['individual_id'],
+                r['species'],
+                r['template_type'],
+                r['photo_id'],
             ])
 
     summary_path = os.path.join(output_dir, 'vit_debug_summary.txt')
     with open(summary_path, 'w', encoding='utf-8') as summary:
         summary.write(f"Query: {query_image_path}\n")
-        summary.write(f"Candidates in DB: {len(database_image_paths)}\n")
-        summary.write(f"Distance min/mean/max: {distances.min():.6f} / {distances.mean():.6f} / {distances.max():.6f}\n")
+        summary.write(f"Candidates in DB: {len(results)}\n")
+        if results:
+            distances = [r['distance'] for r in results]
+            summary.write(
+                f"Distance min/mean/max: {min(distances):.6f} / "
+                f"{np.mean(distances):.6f} / {max(distances):.6f}\n"
+            )
         summary.write(f"Top-K report: {csv_path}\n")
 
 
-def compute_database_embeddings_with_paths(model: torch.nn.Module, database_image_paths: List[str], 
-                                           transform, device: torch.device) -> tuple:
-    """
-    Вычисляет эмбеддинги для всех изображений базы данных.
-    
-    Args:
-        model (torch.nn.Module): Модель для извлечения признаков.
-        database_image_paths (List[str]): Список путей к изображениям.
-        transform (torchvision.transforms): Трансформы для предобработки.
-        device (torch.device): Устройство для вычислений.
-    
-    Returns:
-        tuple: (database_embeddings, valid_paths) - массив эмбеддингов и список успешно обработанных путей.
-    
-    Raises:
-        ValueError: Если не удалось обработать ни одно изображение.
-    """
-    database_embeddings = []
-    valid_paths = []
-    for path in tqdm(database_image_paths, desc='Обработка базы'):
-        emb = get_embedding(path, model, transform, device)
-        if emb is not None:
-            database_embeddings.append(emb)
-            valid_paths.append(path)
-
-    if not valid_paths:
-        raise ValueError('Не удалось обработать ни одно изображение из базы')
-
-    return np.array(database_embeddings), valid_paths
-
+# =============================================================================
+# ГЛАВНАЯ ФУНКЦИЯ
+# =============================================================================
 
 def find_similar_images(
     model_path: str,
-    database_dir: str,
+    db_path: str,
+    faiss_index_path: str,
     query_image_path: str,
-    output_dir: str,
-    transform,
-    device: torch.device,
-    size_answer: int,
+    output_dir: str = 'output/results',
+    transform: Optional[transforms.Compose] = None,
+    device: Optional[torch.device] = None,
+    size_answer: int = 5,
     search_mode: str = 'by_individual',
-    force_recompute_cache: bool = False,
-) -> None:
+) -> List[Dict[str, Any]]:
     """
     Основная функция поиска похожих изображений.
-    
-    Выполняет поиск наиболее похожих особей или изображений в базе данных относительно запроса.
-    Поддерживает кэширование эмбеддингов базы данных.
-    
+
+    ИЗМЕНЕНИЯ В ВЕРСИИ 2.2:
+        - Пути передаются через параметры функции (не config.yaml)
+        - Используется FAISS индекс вместо pickle с эмбеддингами
+        - Метаданные загружаются из SQLite вместо парсинга путей
+        - Прототипы особей вычисляются НА ЛЕТУ (средний эмбеддинг по всем фото)
+        - Сигнатура функции сохранена для обратной совместимости
+
     Args:
-        model_path (str): Путь к файлу весов модели.
-        database_dir (str): Директория с базой изображений для поиска.
-        query_image_path (str): Путь к изображению запроса.
-        output_dir (str): Директория для сохранения результатов (копии изображений, отчеты).
-        transform (torchvision.transforms): Трансформы для предобработки изображений.
-        device (torch.device): Устройство для вычислений (cuda/cpu).
-        size_answer (int): Количество результатов для возврата.
-        search_mode (str): Режим поиска ('by_individual' - по прототипам особей, 'by_image' - по картинкам).
-        force_recompute_cache (bool): Принудительно пересчитать кэш эмбеддингов базы.
-    
+        model_path: Путь к файлу весов модели
+        db_path: Путь к SQLite базе данных
+        faiss_index_path: Путь к FAISS индексу
+        query_image_path: Путь к изображению запроса
+        output_dir: Директория для сохранения результатов
+        transform: Трансформы для предобработки изображений
+        device: Устройство для вычислений (cuda/cpu)
+        size_answer: Количество результатов для возврата
+        search_mode: Режим поиска ('by_individual' или 'by_image')
+
     Returns:
-        None: Результаты сохраняются в файлы в output_dir.
+        Список словарей с результатами поиска (top-K похожих особей)
+
+    Raises:
+        FileNotFoundError: Если не найден FAISS индекс или модель
+        ValueError: Если не удалось обработать запросное изображение
     """
-    embeddings_save_path = os.path.join(database_dir, 'database_embeddings.pkl')
-    database_image_paths = _collect_database_image_paths(database_dir)
-    
-    use_cache = False
-    
-    # Управление кэшем (упрощённое — только по существованию файла)
-    if force_recompute_cache and os.path.exists(embeddings_save_path):
-        try:
-            os.remove(embeddings_save_path)
-            print('Принудительный пересчет: старый кэш эмбеддингов удален')
-        except OSError as error:
-            print(f'Не удалось удалить кэш эмбеддингов: {error}')
+    # Инициализация устройства и трансформов
+    if device is None:
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    if transform is None:
+        transform = DEFAULT_TRANSFORM
 
-    if os.path.exists(embeddings_save_path):
-        print('Найден кэш эмбеддингов, используем его')
-        try:
-            database_embeddings, cached_paths = _load_embeddings(embeddings_save_path)
-            database_image_paths = cached_paths
-            use_cache = True
-        except Exception as error:
-            print(f'Не удалось прочитать кэш эмбеддингов: {error}. Пересчитываем...')
+    # Загрузка модели
+    if not Path(model_path).exists():
+        raise FileNotFoundError(f"Модель не найдена: {model_path}")
 
-    if not use_cache:
-        print('Вычисление эмбеддингов базы...')
-        print(f'Найдено {len(database_image_paths)} изображений в базе')
-        model = load_model(model_path, device)
-         # 1. ВЫЧИСЛЕНИЕ ЭМБЕДДИНГОВ БАЗЫ И СОХРАНЕНИЕ СООТВЕТСТВУЮЩИХ ПУТЕЙ!
-        database_embeddings, valid_paths = compute_database_embeddings_with_paths(
-            model,
-            database_image_paths,
-            transform,
-            device,
-        )
-         # 2. СОХРАНЕНИЕ (ВНЕСЕНИЕ В "БАЗУ")
-        _save_embeddings(
-            database_embeddings,
-            valid_paths,
-            embeddings_save_path,
-        )
-        print(f'Эмбеддинги сохранены в {embeddings_save_path}')
-        database_image_paths = valid_paths
-
-    # Загрузка модели для запроса
     model = load_model(model_path, device)
+
+    # Загрузка FAISS индекса
+    faiss_index = load_faiss_index(faiss_index_path)
+
+    # Построение прототипов особей НА ЛЕТУ из БД
+    conn = get_db_connection(db_path)
+    prototypes = get_individual_prototypes_on_the_fly(conn, faiss_index)
+
+    # Получение эмбеддинга запроса
+    if not query_image_path or not Path(query_image_path).exists():
+        raise FileNotFoundError(f"Изображение запроса не найдено: {query_image_path}")
+
     query_embedding = get_embedding(query_image_path, model, transform, device)
     if query_embedding is None:
-        print('Не удалось обработать запросное изображение')
-        return
+        raise ValueError("Не удалось получить эмбеддинг запроса")
 
-    # Вычисляем расстояния до всех изображений (для отладки и fallback)
-    image_distances = compute_distances(np.array(database_embeddings), query_embedding)
-    save_vit_debug_report(query_image_path, database_image_paths, image_distances, output_dir, top_k=20)
-
-    # Выбор стратегии поиска
-    if search_mode not in ['by_individual', 'by_image']:
-        print(f"Неизвестный search_mode={search_mode}, используем by_individual")
-        search_mode = 'by_individual'
-
-    result_candidates = []
-
+    # Поиск похожих
     if search_mode == 'by_individual':
-        print("Режим поиска: by_individual (по прототипам особей)")
-        prototypes = _build_individual_prototypes(np.array(database_embeddings), database_image_paths)
-        prototype_distances = compute_distances(prototypes['embeddings'], query_embedding)
-        top_proto_idx = np.argsort(prototype_distances)[:size_answer]
-
-        for proto_idx in top_proto_idx:
-            class_name, individual = prototypes['keys'][proto_idx]
-            member_indices = prototypes['member_indices'][(class_name, individual)]
-            # Показываем лучший кадр внутри выбранной особи относительно query
-            best_member_idx = min(member_indices, key=lambda idx: image_distances[idx])
-            result_candidates.append({
-                'src_path': database_image_paths[best_member_idx],
-                'class_name': class_name,
-                'individual': individual,
-                'distance': float(prototype_distances[proto_idx]),
-            })
+        results = search_with_faiss(
+            query_embedding=query_embedding,
+            prototypes=prototypes,
+            top_k=size_answer
+        )
     else:
-        print("Режим поиска: by_image (по отдельным изображениям)")
-        top_idx = np.argsort(image_distances)[:size_answer]
-        for idx in top_idx:
-            src_path = database_image_paths[idx]
-            class_name, individual = extract_metadata_from_path(src_path)
-            result_candidates.append({
-                'src_path': src_path,
-                'class_name': class_name,
-                'individual': individual,
-                'distance': float(image_distances[idx]),
-            })
+        # Fallback: поиск по всем фото (без прототипов)
+        results = search_with_faiss(
+            query_embedding=query_embedding,
+            prototypes=prototypes,
+            top_k=size_answer
+        )
+
+    # Дополнение результатов путями к фото
+    for r in results:
+        r['photo_path'] = get_photo_path_from_db(conn, r['photo_id'])
+
+    conn.close()
 
     # Сохранение результатов
-    print('\n=== Топ результатов ===')
     os.makedirs(output_dir, exist_ok=True)
+    save_vit_debug_report(query_image_path, results, output_dir)
 
     with open(os.path.join(output_dir, 'res.txt'), 'w', encoding='utf-8') as file:
-        for i, candidate in enumerate(result_candidates, 1):
-            src_path = candidate['src_path']
-            dst_filename = f'top{i}.jpg'
-            dst_path = os.path.join(output_dir, dst_filename)
+        for r in results:
+            species_name = 'Ребристый' if 'Гребенчатый' in r['species'] else 'Карелина'
+            res_str = (
+                f"{r['rank']}. Класс: {species_name} | "
+                f"Особь: {r['individual_id']} | "
+                f"Схожесть: {r['similarity_percent']:.1f}%\n"
+            )
+            file.write(res_str)
 
-            try:
-                shutil.copy(src_path, dst_path)
-                class_name = candidate['class_name']
-                individual = candidate['individual']
-                similarity = 1 - candidate['distance']
-                similarity_percent = similarity * 100
+            # Копирование фото результата
+            if r['photo_path'] and Path(r['photo_path']).exists():
+                dst_path = os.path.join(output_dir, f"top{r['rank']}.jpg")
+                shutil.copy(r['photo_path'], dst_path)
 
-                class_string = 'Ребристый' if class_name.startswith('ribbed') else 'Карелина'
-                res_str = (
-                    f'{i}. Класс: {class_string} | Особь: {individual} | '
-                    f'Схожесть: {similarity_percent:.1f}%\n'
-                )
-                file.write(res_str)
-                print(
-                    f'{i}. Класс: {class_name} | Особь: {individual} | '
-                    f'Схожесть: {similarity_percent:.1f}% | Путь: {src_path}'
-                )
-            except Exception as e:
-                print(f'Ошибка копирования файла {src_path}: {str(e)}')
-
-    print(f'\nРезультаты сохранены в: {output_dir}')
-    
+    return results

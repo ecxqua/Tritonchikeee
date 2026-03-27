@@ -20,9 +20,10 @@ id-model:
   embedding_dim: 512  # Неактивно
   droupout_rate: 0.4  # Неактивно
 
-# Конфигурация базы данных.
+# Конфигурация бд и faiss.
 db:
-  path: "data/dataset_crop/dataset_crop_24_new"
+  db_path: "database/cards.db"
+  faiss_index_path: "data/embeddings/database_embeddings.pkl"
 
 view:
   size_answer: 5  # Размер рейтинга

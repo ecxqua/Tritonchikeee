@@ -5,7 +5,7 @@ import yaml
 import asyncio
 from torchvision import transforms
 from .deployment_yolo_new import process_single_image
-from .deployment_vit import find_similar_images
+from .deployment_vit_faiss import find_similar_images
 from .save_new import save_new_individual
 from config import load_config
 
@@ -38,8 +38,9 @@ async def photo_processing(config):
             # Путь к обученной ViT модели
             MODEL_PATH = config["id-model"]["path"]
 
-            # Директория с базой данных изображений для поиска
-            DATABASE_DIR = config["db"]["path"]
+            # SQLite3 и FAISS
+            DB_PATH = config["db"]["db_path"]
+            FAISS_INDEX_PATH = config["db"]["faiss_index_path"]
 
             # Путь к обрезанному изображению от YOLO
             QUERY_IMAGE = f'{config["io"]["output_folder"]}/image_cropped.jpg'
@@ -66,7 +67,8 @@ async def photo_processing(config):
             # Вызываем функцию поиска похожих изображений
             find_similar_images(
                 model_path=MODEL_PATH,  # Путь к модели
-                database_dir=DATABASE_DIR,  # База данных для поиска
+                db_path=DB_PATH,  # База данных для поиска
+                faiss_index_path=FAISS_INDEX_PATH,
                 query_image_path=QUERY_IMAGE,  # Запрашиваемое изображение
                 output_dir=OUTPUT_DIR,  # Куда сохранять результаты
                 transform=TRANSFORMS,
