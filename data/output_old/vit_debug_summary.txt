@@ -1,0 +1,4 @@
+Query: data/output/image_cropped.jpg
+Candidates in DB: 610
+Distance min/mean/max: 0.022295 / 0.713767 / 1.600701
+Top-K report: data/output\vit_debug_topk.csv

@@ -1,4 +1,5 @@
 from datetime import datetime
+from pathlib import Path
 import torch
 import yaml
 import asyncio
@@ -6,21 +7,10 @@ from torchvision import transforms
 from .deployment_yolo_new import process_single_image
 from .deployment_vit import find_similar_images
 from .save_new import save_new_individual
+from config import load_config
 
 
-# Загрузка конфигураций
-def load_config(config_path="config/config.yaml"):
-    """Загрузка файла конфигураций 'config.yaml'"""
-    try:
-        with open(config_path, "r", encoding="UTF-8") as f:
-            return yaml.safe_load(f)
-    except FileNotFoundError:
-        raise FileNotFoundError(
-            "Добавьте файл конфигурации для анализа: config/config.yaml"
-        )
-
-
-async def photo_processing(config, filepath):
+async def photo_processing(config):
     """
     Основная функция обработки фотографии
 
@@ -29,10 +19,11 @@ async def photo_processing(config, filepath):
     2) Поиск похожих изображений с помощью ViT модели.
     """
     try:
+        print("YOLO-сегментация")
         # Вызываем YOLO модель для детекции и обрезки брюшка тритона
         # Функция сохраняет обрезанное изображение как image_cropped.jpg
         success = await process_single_image(
-            filepath,
+            str(Path(config["io"]["input_folder"], config["io"]["image_name"])),
             config["io"]["output_folder"],
             config["seg-model"]["trim_top_pct"],
             config["seg-model"]["trim_bottom_pct"],
@@ -122,4 +113,4 @@ def save_new_person(
 
 
 if __name__ == "__main__":
-    asyncio.run(photo_processing(load_config(), "data/input/image.png"))
+    asyncio.run(photo_processing(load_config()))

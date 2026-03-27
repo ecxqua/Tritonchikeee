@@ -8,7 +8,7 @@ from pathlib import Path
 from datetime import datetime
 
 DB_PATH = Path("database/cards.db")
-DATASET_PATH = Path("data/dataset_crop/dataset_crop_24")
+DATASET_PATH = Path("data/dataset_crop/dataset_crop_24_new")
 
 SPECIES_CONFIG = {
     "karelin": {

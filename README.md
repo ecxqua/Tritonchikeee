@@ -32,9 +32,9 @@
 
 Если вы хотите обнулить все базы, то выполните следующие шаги:
 1. Удалите `cards.sqlite3` и `database_embeddings.pkl`.
-2. Выполните `python -m cards_database` для инициализации баз данных.
-3. Выполните `python -m migrate_dataset` для миграции особей из файловой системы фото в `data\dataset_crop\dataset_crop_24`.
-4. Выполните `python -m build_faiss_index.py` для создания эмбеддингов для каждого фото в таблице `photos` и соединения
+2. Выполните `python -m database.card_database` для инициализации баз данных.
+3. Выполните `python -m database.migrate_dataset` для миграции особей из файловой системы фото в `data\dataset_crop\dataset_crop_24`.
+4. Выполните `python -m database.build_faiss_index.py` для создания эмбеддингов для каждого фото в таблице `photos` и соединения
 фото с эмбеддингом в faiss-index.
 
 В `pipeline/analyse.py` есть функция `save_new_person()` для добавления новой особи в базы данных (необходим эмбеддинг).
