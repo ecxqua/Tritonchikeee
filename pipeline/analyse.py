@@ -3,7 +3,7 @@ import torch
 import yaml
 import asyncio
 from torchvision import transforms
-from .deployment_yolo import process_single_image
+from .deployment_yolo_new import process_single_image
 from .deployment_vit import find_similar_images
 from .save_new import save_new_individual
 

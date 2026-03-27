@@ -7,7 +7,7 @@ models:
 
 # Конфигурация модели сегментации.
 seg-model:
-  path: "models/best_seg.pt"
+  path: "models/best.pt"
   trim_top_pct: 0.3
   trim_bottom_pct: 0.15
   final_size: 244
@@ -15,13 +15,13 @@ seg-model:
 
 # Конфигурация модели идентификации.
 id-model:
-  path: "models/best_model.pth"
+  path: "models/vit_reid_best_p1_2026-03-22.pth"
   embedding_dim: 512  # Неактивно
   droupout_rate: 0.4  # Неактивно
 
 # Конфигурация базы данных.
 db:
-  path: "data/dataset_crop/dataset_crop_24"
+  path: "data/dataset_crop/dataset_crop_24_new"
 
 view:
   size_answer: 5  # Размер рейтинга
