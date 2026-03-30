@@ -19,7 +19,7 @@ from database.card_database import DB_PATH
 
 # Добавляем pipeline в путь для импорта
 sys.path.append(str(Path(__file__).parent.parent))
-from pipeline.deployment_vit import EnhancedTripletNet, load_model
+from pipeline.deployment_vit_faiss import EnhancedTripletNet, load_model
 
 MODEL_PATH = Path("models/best_model.pth")
 FAISS_INDEX_PATH = Path("data/embeddings/database_embeddings.pkl")

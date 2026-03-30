@@ -657,19 +657,3 @@ if __name__ == '__main__':
         print(f"✅ Результат: {result['success']}")
     else:
         print(f"\n⚠️ Тестовое фото не найдено: {test_image}")
-
-    # print("\n3️⃣ Добавление новой особи...")
-    
-    # result = add_individual_sync(
-    #     photo_path_full="data/input/01.jpg",
-    #     species='Карелина',
-    #     template_type='ИК-1',
-    #     project_name='Тест_2026',
-    #     individual_id='NT-K-TEST-001',  # Фиксированный ID для теста
-    #     output_dir=config['db']['cropped_folder'],
-    #     config=config,
-    #     notes='Тестовая особь для проверки пайплайна',
-    #     length_body=50.0,
-    #     weight=4.5,
-    #     sex="Ж"
-    # )

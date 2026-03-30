@@ -1,0 +1,1 @@
+from pipeline.analyse import process_photo

@@ -34,6 +34,7 @@ data/dataset_crop/database_embeddings.pkl
 models/
 data/input/
 data/output/
+data/output_old
 data/cropped/
 
 # Training outputs and checkpoints

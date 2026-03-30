@@ -23,7 +23,7 @@ if not token or token == "PASTE_YOUR_TELEGRAM_BOT_TOKEN_HERE":
 
 # Функция загрузки папки весов из Google Drive
 def download_models_folder():
-    models_dir = Path("models")
+    models_dir = Path(bot.config["models"]["path"])
     required_files = [
         models_dir / "best_seg.pt",
         models_dir / "best_model.pth",

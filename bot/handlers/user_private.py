@@ -1,6 +1,6 @@
 from aiogram import Router, types, F, Bot
 from aiogram.filters import CommandStart
-from pipeline import photo_processing
+from pipeline import process_photo
 import os
 from pathlib import Path
 
@@ -45,7 +45,7 @@ async def handle_photo(message: types.Message, bot: Bot):
         )
 
         # Обрабатываем изображение с помощью модели
-        success = await photo_processing(bot.config, filepath)
+        success = await process_photo(filepath, bot.config["io"]["output_folder"], bot.config, 5)
 
         if success:
             await send_results(message, bot)
@@ -63,6 +63,7 @@ async def handle_document(message: types.Message, bot: Bot):
     Обработчик загрузки файлов (изображений как документов)
     """
     try:
+        print("Обработка документа!")
         # Проверяем, что это изображение по расширению файла
         document = message.document
 
@@ -107,7 +108,7 @@ async def handle_document(message: types.Message, bot: Bot):
         )
 
         # Обрабатываем изображение с помощью модели
-        success = await photo_processing(bot.config, filepath)
+        success = await process_photo(filepath, bot.config["io"]["output_folder"], bot.config, 5)
 
         if success:
             await send_results(message, bot)
