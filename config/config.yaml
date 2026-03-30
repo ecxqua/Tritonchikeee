@@ -2,7 +2,7 @@
 # API обращается по любым аргументам.
 io:
   input_folder: "data/input/" # Папка для входных фото
-  image_name: "image.jpg"
+  image_name: "image.jpg"  # Входное фото
   output_folder: "data/output/" # Папка для результатов и артефактов
 
 models:
