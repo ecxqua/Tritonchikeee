@@ -1,16 +1,34 @@
+"""
+database/cards_database.py — Инициализация SQLite базы данных.
+
+Таблицы:
+    1. individuals — карточки особей (ИК-1, ИК-2, КВ-1, КВ-2)
+    2. photos — фотографии особей (full, cropped)
+    3. uploads — временные загрузки (Two-Phase Commit) ⭐ НОВОЕ
+
+Индексы:
+    - Оптимизированы для поиска по FAISS embedding_index
+    - Оптимизированы для очистки просроченных загрузок
+"""
+
 import sqlite3
 from pathlib import Path
 
 DB_PATH = Path("database/cards.db")
 
 def init_database():
-    DB_PATH.parent.mkdir(exist_ok=True)
+    """
+    Инициализировать базу данных (создать таблицы и индексы).
+    Идемпотентно: можно вызывать многократно без побочных эффектов.
+    """
+    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     
-    # === ТАБЛИЦА 1: individuals (ваша текущая структура) ===
-    # Одна запись = одна карточка (ИК-1, ИК-2, КВ-1, КВ-2)
+    # =============================================================================
+    # ТАБЛИЦА 1: individuals (карточки особей)
+    # =============================================================================
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS individuals (
             -- === СЛУЖЕБНЫЕ ПОЛЯ (для всех шаблонов) ===
@@ -55,8 +73,9 @@ def init_database():
         )
     ''')
     
-    # === ТАБЛИЦА 2: photos (все фотографии) ===
-    # Множество записей на одну карточку (multiple photos per card)
+    # =============================================================================
+    # ТАБЛИЦА 2: photos (все фотографии)
+    # =============================================================================
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS photos (
             -- PRIMARY KEY
@@ -95,39 +114,84 @@ def init_database():
         )
     ''')
     
-    # === ИНДЕКСЫ для ускорения поиска ===
-
-    # 1. 🔥 КРИТИЧЕСКИЙ: Поиск фото по вектору из FAISS
-    # Когда FAISS возвращает [1547, 1548, 1549], мы ищем фото по этим номерам
+    # =============================================================================
+    # ТАБЛИЦА 3: uploads (временные загрузки) ⭐ НОВОЕ
+    # =============================================================================
+    # Для Two-Phase Commit: анализ → подтверждение
     cursor.execute('''
-        CREATE INDEX IF NOT EXISTS idx_photos_embedding 
-        ON photos(embedding_index)
+        CREATE TABLE IF NOT EXISTS uploads (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            project_id INTEGER NOT NULL,         -- Для изоляции проектов
+            file_path TEXT NOT NULL,             -- Путь к кропу брюшка
+            embedding TEXT NOT NULL,             -- JSON строка: "[0.1, 0.2, ...]"
+            status TEXT DEFAULT 'pending',       -- pending, completed, cancelled
+            card_id TEXT,                        -- Ссылка на созданную карточку (после confirm)
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            expires_at TIMESTAMP NOT NULL        -- created_at + 24h (для автоочистки)
+        )
     ''')
-
-    # 2. 🔥 КРИТИЧЕСКИЙ: Связь фото → особь
-    # Чтобы по фото найти карточку тритона (JOIN individuals)
-    cursor.execute('''
-        CREATE INDEX IF NOT EXISTS idx_photos_individual 
-        ON photos(individual_id)
-    ''')
-
-    # 3. 🟡 ПОЛЕЗНЫЙ: Фильтрация полных/кроп фото
-    # Если будете часто выбирать только кропы для ViT
-    cursor.execute('''
-        CREATE INDEX IF NOT EXISTS idx_photos_type 
-        ON photos(photo_type)
-    ''')
-
-    # 4. 🟡 ПОЛЕЗНЫЙ: Фильтрация по типу карточки
-    # Если будете делать отчёты по ИК-1/ИК-2/КВ-1/КВ-2
+    
+    # =============================================================================
+    # ИНДЕКСЫ
+    # =============================================================================
+    
+    # --- individuals ---
     cursor.execute('''
         CREATE INDEX IF NOT EXISTS idx_individuals_template 
         ON individuals(template_type)
     ''')
     
+    cursor.execute('''
+        CREATE INDEX IF NOT EXISTS idx_individuals_project 
+        ON individuals(project_name)
+    ''')
+    
+    cursor.execute('''
+        CREATE INDEX IF NOT EXISTS idx_individuals_species 
+        ON individuals(species)
+    ''')
+    
+    # --- photos ---
+    # 🔥 КРИТИЧЕСКИЙ: Поиск фото по вектору из FAISS
+    cursor.execute('''
+        CREATE INDEX IF NOT EXISTS idx_photos_embedding 
+        ON photos(embedding_index)
+    ''')
+
+    # 🔥 КРИТИЧЕСКИЙ: Связь фото → особь
+    cursor.execute('''
+        CREATE INDEX IF NOT EXISTS idx_photos_individual 
+        ON photos(individual_id)
+    ''')
+
+    # 🟡 ПОЛЕЗНЫЙ: Фильтрация полных/кроп фото
+    cursor.execute('''
+        CREATE INDEX IF NOT EXISTS idx_photos_type 
+        ON photos(photo_type)
+    ''')
+    
+    # --- uploads ⭐ НОВЫЕ ИНДЕКСЫ ---
+    # 🔥 КРИТИЧЕСКИЙ: Быстрая очистка просроченных загрузок
+    cursor.execute('''
+        CREATE INDEX IF NOT EXISTS idx_uploads_status_expires 
+        ON uploads(status, expires_at)
+    ''')
+    
+    # 🔥 КРИТИЧЕСКИЙ: Поиск загрузок по проекту
+    cursor.execute('''
+        CREATE INDEX IF NOT EXISTS idx_uploads_project 
+        ON uploads(project_id)
+    ''')
+    
+    # 🟡 ПОЛЕЗНЫЙ: Поиск по статусу (pending/completed/cancelled)
+    cursor.execute('''
+        CREATE INDEX IF NOT EXISTS idx_uploads_status 
+        ON uploads(status)
+    ''')
+    
     conn.commit()
     conn.close()
-    print(f"✅ База карточек создана: {DB_PATH}")
+    print(f"✅ База карточек создана/обновлена: {DB_PATH}")
 
 # Первый запуск
 if __name__ == "__main__":
