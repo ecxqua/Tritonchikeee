@@ -1,13 +1,12 @@
 """
-services/card_service.py — Бизнес-логика управления карточками особей.
-Адаптировано из save_new.py для интеграции с API.
+services/card_service.py — CRUD операции для карточек особей и проектов.
 
 Архитектурные принципы:
-    1. Нет прямого доступа к FAISS → вызываем EmbeddingService
-    2. Нет print() → используем logging
-    3. Нет хардкода путей → передаются через параметры
-    4. Нет init_database() в функциях → инициализация при старте
-    5. Типизация → для поддержки в IDE и API
+    1. ✅ ВЕСЬ CRUD здесь (не в card_database.py)
+    2. ✅ project_id (INTEGER, FK → projects.id)
+    3. ✅ Нет прямого доступа к FAISS → EmbeddingService
+    4. ✅ Нет print() → используем logging
+    5. ✅ Типизация → для поддержки в IDE и API
 
 Зависимости:
     - database/cards.db — SQLite база
@@ -18,6 +17,8 @@ import logging
 from pathlib import Path
 from datetime import datetime
 import sqlite3
+import json
+import numpy as np
 from typing import Optional, Dict, List, Any
 
 from database.card_database import DB_PATH
@@ -64,7 +65,6 @@ def _validate_template_fields(template_type: str, card_data: dict) -> None:
 def get_next_animal_number(cursor: sqlite3.Cursor, species: str) -> int:
     """Возвращает следующий порядковый номер для животного данного вида."""
     prefix = SPECIES_PREFIX.get(species, 'X')
-    
     cursor.execute('''
         SELECT COUNT(DISTINCT CAST(
             SUBSTR(
@@ -76,7 +76,6 @@ def get_next_animal_number(cursor: sqlite3.Cursor, species: str) -> int:
         FROM individuals
         WHERE individual_id LIKE ?
     ''', (f"NT-{prefix}-%",))
-    
     count = cursor.fetchone()[0]
     return (count or 0) + 1
 
@@ -86,10 +85,7 @@ def generate_card_id(
     template_type: str, 
     animal_id: Optional[str] = None
 ) -> str:
-    """
-    Генерирует ID карточки.
-    Ищет СВОБОДНЫЙ ID, не возвращает существующий.
-    """
+    """Генерирует ID карточки. Ищет СВОБОДНЫЙ ID."""
     prefix = SPECIES_PREFIX.get(species, 'X')
     template_short = template_type.replace("-", " ")
     
@@ -99,11 +95,9 @@ def generate_card_id(
     attempts = 0
     while attempts < 1000:
         card_id = f"{animal_id}-{template_short}"
-        
         cursor.execute('SELECT individual_id FROM individuals WHERE individual_id = ?', (card_id,))
         if not cursor.fetchone():
             return card_id
-        
         attempts += 1
         current_num = int(animal_id.split('-')[2])
         animal_id = f"NT-{prefix}-{current_num + 1}"
@@ -112,35 +106,102 @@ def generate_card_id(
 
 def _get_next_photo_number(cursor: sqlite3.Cursor, individual_id: str) -> str:
     """Автоматически генерирует порядковый номер фото (01, 02, 03...)."""
-    cursor.execute(
-        "SELECT COUNT(*) FROM photos WHERE individual_id = ?",
-        (individual_id,)
-    )
+    cursor.execute("SELECT COUNT(*) FROM photos WHERE individual_id = ?", (individual_id,))
     count = cursor.fetchone()[0]
     return f"{count + 1:02d}"
+
+# =============================================================================
+# PROJECT CRUD (Теперь здесь!)
+# =============================================================================
+
+def get_or_create_project(project_name: str, description: str = None, db_path: str = DB_PATH) -> int:
+    """
+    Получить ID проекта по имени или создать новый.
+    
+    Returns:
+        int: project_id
+    """
+    conn = get_db_connection(db_path)
+    cursor = conn.cursor()
+    
+    try:
+        cursor.execute('SELECT id FROM projects WHERE name = ?', (project_name,))
+        row = cursor.fetchone()
+        
+        if row:
+            return row['id']
+        
+        cursor.execute('''
+            INSERT INTO projects (name, description, created_at)
+            VALUES (?, ?, ?)
+        ''', (project_name, description, datetime.now().isoformat()))
+        
+        project_id = cursor.lastrowid
+        conn.commit()
+        return project_id
+        
+    finally:
+        conn.close()
+
+def get_project_by_id(project_id: int, db_path: str = DB_PATH) -> Optional[Dict[str, Any]]:
+    """Получить данные проекта по ID."""
+    conn = get_db_connection(db_path)
+    cursor = conn.cursor()
+    
+    try:
+        cursor.execute('SELECT * FROM projects WHERE id = ?', (project_id,))
+        row = cursor.fetchone()
+        return dict(row) if row else None
+    finally:
+        conn.close()
+
+def get_project_id_by_name(project_name: str, db_path: str = DB_PATH) -> Optional[int]:
+    """Получить ID проекта по имени."""
+    conn = get_db_connection(db_path)
+    cursor = conn.cursor()
+    
+    try:
+        cursor.execute('SELECT id FROM projects WHERE name = ?', (project_name,))
+        row = cursor.fetchone()
+        return row['id'] if row else None
+    finally:
+        conn.close()
+
+def list_projects(active_only: bool = True, db_path: str = DB_PATH) -> List[Dict[str, Any]]:
+    """Получить список всех проектов."""
+    conn = get_db_connection(db_path)
+    cursor = conn.cursor()
+    
+    try:
+        if active_only:
+            cursor.execute('''
+                SELECT id, name, description, created_at
+                FROM projects
+                WHERE is_active = 1
+                ORDER BY name
+            ''')
+        else:
+            cursor.execute('''
+                SELECT id, name, description, is_active, created_at
+                FROM projects
+                ORDER BY name
+            ''')
+        return [dict(row) for row in cursor.fetchall()]
+    finally:
+        conn.close()
 
 # =============================================================================
 # CARD SERVICE — Основная бизнес-логика
 # =============================================================================
 
 class CardService:
-    """
-    Универсальный CRUD для управления карточками особей.
-    
-    ВАЖНО: Для работы с FAISS использует EmbeddingService (не напрямую).
-    Это обеспечивает синхронизацию БД и индекса.
-    """
+    """Универсальный CRUD для управления карточками особей."""
     
     def __init__(
         self, 
         db_path: str = DB_PATH,
-        embedding_service: Optional[Any] = None  # Injected dependency
+        embedding_service: Optional[Any] = None
     ):
-        """
-        Args:
-            db_path: Путь к SQLite базе
-            embedding_service: Экземпляр EmbeddingService для работы с FAISS
-        """
         self.db_path = db_path
         self.embedding_service = embedding_service
     
@@ -157,7 +218,8 @@ class CardService:
         photo_path_full: Optional[str] = None,
         photo_path_cropped: Optional[str] = None,
         species: str = "Карелина",
-        project_name: str = "Основной",
+        project_id: Optional[int] = None,  # 🔥 ИЗМЕНЕНО: project_id вместо project_name
+        project_name: Optional[str] = None,  # Для обратной совместимости
         template_type: str = "ИК-1",
         individual_id: Optional[str] = None,
         photo_number: Optional[str] = None,
@@ -165,31 +227,20 @@ class CardService:
         add_to_faiss: bool = True,
         **card_data
     ) -> str:
-        """
-        Сохраняет новую особь в базу данных (карточка + фотографии).
-        
-        Args:
-            photo_path_full: Путь к полному фото
-            photo_path_cropped: Путь к кропу брюшка
-            species: Вид тритона
-            project_name: Название проекта
-            template_type: Тип карточки (ИК-1, ИК-2, КВ-1, КВ-2)
-            individual_id: ID карточки (если None, генерируется)
-            photo_number: Номер фото (если None, генерируется)
-            is_legacy: Флаг "из старого датасета"
-            add_to_faiss: Добавлять ли в FAISS (если False, только БД)
-            **card_data: Дополнительные поля карточки
-        
-        Returns:
-            str: individual_id сохранённой карточки
-        
-        Raises:
-            ValueError: Если не хватает обязательных полей для шаблона
-        """
+        """Сохраняет новую особь в базу данных (карточка + фотографии)."""
         _validate_template_fields(template_type, card_data)
         
         conn = get_db_connection(self.db_path)
         cursor = conn.cursor()
+        
+        # 🔥 ОПРЕДЕЛЕНИЕ PROJECT_ID
+        if project_id is None:
+            if project_name:
+                project_id = get_or_create_project(project_name, db_path=self.db_path)
+                logger.info(f"Использован проект: '{project_name}' (ID={project_id})")
+            else:
+                project_id = get_or_create_project("Основной", db_path=self.db_path)
+                logger.info(f"Использован проект по умолчанию: 'Основной' (ID={project_id})")
         
         if individual_id is None:
             individual_id = f"NT-{datetime.now().strftime('%y%m%d%H%M%S')}"
@@ -203,7 +254,7 @@ class CardService:
             # === ТАБЛИЦА 1: individuals ===
             cursor.execute('''
                 INSERT INTO individuals (
-                    individual_id, template_type, species, project_name,
+                    individual_id, template_type, species, project_id,
                     created_at, date, notes,
                     length_body, length_tail, length_total, weight, sex,
                     birth_year_exact, birth_year_approx, origin_region,
@@ -212,7 +263,7 @@ class CardService:
                     meeting_time, status, water_body_number
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
-                individual_id, template_type, species, project_name,
+                individual_id, template_type, species, project_id,
                 datetime.now().isoformat(),
                 card_data.get('date', datetime.now().strftime("%d.%m.%Y")),
                 card_data.get('notes'),
@@ -242,7 +293,6 @@ class CardService:
             
             # === ТАБЛИЦА 2: photos (кроп брюшка) ===
             if photo_path_cropped:
-                # Сначала сохраняем с embedding_index = -1 (заглушка)
                 cursor.execute('''
                     INSERT INTO photos (
                         individual_id, photo_type, photo_number, photo_path,
@@ -254,30 +304,24 @@ class CardService:
                     card_data.get('meeting_time'), 
                     1 if not photo_path_full else 0,
                     1,
-                    -1,  # Заглушка, обновится ниже
+                    -1,
                     1 if is_legacy else 0
                 ))
                 
                 # === FAISS: Добавляем через EmbeddingService ===
                 if add_to_faiss and self.embedding_service:
                     try:
-                        # Получаем embedding из кропа (вызывает ViT модель)
                         embedding = self.embedding_service.compute_embedding(photo_path_cropped)
-                        
-                        # Добавляем в FAISS через сервис
                         embedding_index = self.embedding_service.add(embedding, {
                             'individual_id': individual_id,
                             'photo_path': photo_path_cropped,
                             'template_type': template_type,
                             'species': species
                         })
-                        
-                        # Обновляем запись в БД
                         self._update_photo_embedding_index(cursor, photo_path_cropped, embedding_index)
                         logger.info(f"Добавлено в FAISS: индекс {embedding_index}")
                     except Exception as faiss_error:
                         logger.warning(f"Ошибка добавления в FAISS: {faiss_error}")
-                        # Не прерываем выполнение, БД уже сохранена
             
             conn.commit()
             
@@ -302,28 +346,9 @@ class CardService:
         upload_id: int,
         template_type: str,
         species: str = "Карелина",
-        project_name: str = "Основной",
         **card_data
     ) -> str:
-        """
-        Завершает временную загрузку (из uploads) → создаёт постоянную карточку.
-        
-        Это метод для Two-Phase Commit:
-            1. Читает данные из таблицы uploads
-            2. Создаёт карточку в individuals + photos
-            3. Добавляет embedding в FAISS
-            4. Помечает upload как completed
-        
-        Args:
-            upload_id: ID временной загрузки
-            template_type: Шаблон карточки (ИК-1, ИК-2, КВ-1, КВ-2)
-            species: Вид тритона
-            project_name: Название проекта
-            **card_data: Дополнительные поля карточки
-        
-        Returns:
-            str: individual_id созданной карточки
-        """
+        """Завершает временную загрузку (из uploads) → создаёт постоянную карточку."""
         conn = get_db_connection(self.db_path)
         cursor = conn.cursor()
         
@@ -342,27 +367,25 @@ class CardService:
             raise ValueError(f"Загрузка {upload_id} уже обработана (статус: {upload['status']})")
         
         # 2. Десериализуем embedding
-        import json
         embedding = json.loads(upload['embedding'])
-        import numpy as np
         embedding = np.array(embedding, dtype='float32')
         
         photo_path_cropped = upload['file_path']
-        project_id = upload['project_id']
+        project_id = upload['project_id']  # 🔥 Уже есть project_id из uploads
         
         # 3. Генерируем ID
         individual_id = generate_card_id(cursor, species, template_type)
         photo_number = _get_next_photo_number(cursor, individual_id)
         
         try:
-            # === Создаём карточку (аналогично save_new_individual) ===
+            # === Создаём карточку ===
             cursor.execute('''
                 INSERT INTO individuals (
-                    individual_id, template_type, species, project_name,
+                    individual_id, template_type, species, project_id,
                     created_at, date
                 ) VALUES (?, ?, ?, ?, ?, ?)
             ''', (
-                individual_id, template_type, species, project_name,
+                individual_id, template_type, species, project_id,
                 datetime.now().isoformat(),
                 card_data.get('date', datetime.now().strftime("%d.%m.%Y"))
             ))
@@ -379,7 +402,6 @@ class CardService:
             ))
             
             # === FAISS: Добавляем embedding ===
-            embedding_index = None
             if self.embedding_service:
                 embedding_index = self.embedding_service.add(embedding, {
                     'individual_id': individual_id,
@@ -439,9 +461,7 @@ class CardService:
         add_to_faiss: bool = True,
         **card_data
     ) -> str:
-        """
-        Добавляет НОВУЮ ВСТРЕЧУ (КВ-1/КВ-2) для существующей особи.
-        """
+        """Добавляет НОВУЮ ВСТРЕЧУ (КВ-1/КВ-2) для существующей особи."""
         if template_type not in ['КВ-1', 'КВ-2']:
             raise ValueError("Для добавления встречи используйте шаблоны КВ-1 или КВ-2")
         
@@ -451,16 +471,21 @@ class CardService:
         cursor = conn.cursor()
         photo_number = _get_next_photo_number(cursor, individual_id)
         
+        # Получаем project_id из существующей особи
+        cursor.execute('SELECT project_id FROM individuals WHERE individual_id = ?', (individual_id,))
+        row = cursor.fetchone()
+        project_id = row['project_id'] if row else 1
+        
         try:
             cursor.execute('''
                 INSERT INTO individuals (
-                    individual_id, template_type, species, project_name,
+                    individual_id, template_type, species, project_id,
                     date, meeting_time, status, water_body_number, water_body_name,
                     length_body, length_tail, length_total, weight, sex, notes,
                     created_at
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
-                individual_id, template_type, "Карелина", "Основной",
+                individual_id, template_type, "Карелина", project_id,
                 card_data.get('date', datetime.now().strftime("%d.%m.%Y")),
                 card_data.get('time'), card_data.get('status'),
                 card_data.get('water_body_number'), card_data.get('water_body_name'),
@@ -604,15 +629,36 @@ class CardService:
         return photos
     
     def get_individual(self, individual_id: str) -> Optional[Dict[str, Any]]:
-        """Получает данные особи по ID."""
+        """Получает данные особи по ID (с информацией о проекте)."""
         conn = get_db_connection(self.db_path)
         cursor = conn.cursor()
         
+        # 🔥 JOIN с projects для получения названия проекта
         cursor.execute('''
-            SELECT * FROM individuals WHERE individual_id = ?
+            SELECT i.*, p.name as project_name
+            FROM individuals i
+            LEFT JOIN projects p ON i.project_id = p.id
+            WHERE i.individual_id = ?
         ''', (individual_id,))
         
         row = cursor.fetchone()
         conn.close()
         
         return dict(row) if row else None
+    
+    def get_individuals_by_project(self, project_id: int) -> List[Dict[str, Any]]:
+        """Получает список особей по проекту."""
+        conn = get_db_connection(self.db_path)
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT individual_id, template_type, species, created_at, date
+            FROM individuals
+            WHERE project_id = ?
+            ORDER BY created_at DESC
+        ''', (project_id,))
+        
+        individuals = [dict(row) for row in cursor.fetchall()]
+        conn.close()
+        
+        return individuals

@@ -1,24 +1,25 @@
 """
-services/upload_service.py — Управление временными загрузками (Two-Phase Commit)
+services/upload_service.py — CRUD для временных загрузок (Two-Phase Commit).
 
-АРХИТЕКТУРНЫЕ ПРИНЦИПЫ:
-    1. Хранит временные данные между запросами API (анализ → подтверждение)
-    2. Embedding хранится в БД (JSON), НЕ в FAISS (до подтверждения)
-    3. Нет доступа к pipeline → только БД операции
-    4. Автоочистка старых загрузок (expired)
+Архитектурные принципы:
+    1. ✅ CRUD для uploads только здесь
+    2. ✅ Валидация project_id через card_service.get_project_by_id()
+    3. ✅ Нет доступа к pipeline
+    4. ✅ Автоочистка старых загрузок (expired)
 
 Зависимости:
-    - database/cards.db — SQLite база (таблица uploads)
+    - database/cards.db — SQLite база
+    - services/card_service.py — валидация проектов
 """
 
 import logging
 import json
 import sqlite3
 from datetime import datetime, timedelta
-from pathlib import Path
 from typing import Optional, Dict, Any, List
 
 from database.card_database import DB_PATH
+from services.card_service import get_project_by_id  # 🔥 Валидация из card_service
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +27,7 @@ logger = logging.getLogger(__name__)
 # КОНСТАНТЫ
 # =============================================================================
 
-UPLOAD_EXPIRY_HOURS = 24  # Время жизни временной загрузки
+UPLOAD_EXPIRY_HOURS = 24
 
 # =============================================================================
 # ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
@@ -39,31 +40,13 @@ def get_db_connection(db_path: str = DB_PATH) -> sqlite3.Connection:
     return conn
 
 def serialize_embedding(embedding: Any) -> str:
-    """
-    Сериализовать embedding в JSON строку для хранения в БД.
-    
-    Args:
-        embedding: np.ndarray или list[float]
-    
-    Returns:
-        str: JSON строка
-    """
-    # Конвертация numpy → list
+    """Сериализовать embedding в JSON строку для хранения в БД."""
     if hasattr(embedding, 'tolist'):
         embedding = embedding.tolist()
-    
     return json.dumps(embedding)
 
 def deserialize_embedding(embedding_str: str) -> List[float]:
-    """
-    Десериализовать embedding из JSON строки.
-    
-    Args:
-        embedding_str: JSON строка из БД
-    
-    Returns:
-        list[float]: Вектор эмбеддинга
-    """
+    """Десериализовать embedding из JSON строки."""
     return json.loads(embedding_str)
 
 # =============================================================================
@@ -71,30 +54,9 @@ def deserialize_embedding(embedding_str: str) -> List[float]:
 # =============================================================================
 
 class UploadService:
-    """
-    Управление временными загрузками для Two-Phase Commit.
-    
-    Поток данных:
-        1. POST /analyze → create_upload() → upload_id
-        2. POST /confirm → get_upload(upload_id) → finalize (в card_service)
-        3. POST /cancel → cancel_upload(upload_id)
-    
-    Таблица uploads:
-        - id: PRIMARY KEY
-        - project_id: INTEGER (для изоляции проектов)
-        - file_path: TEXT (путь к кропу)
-        - embedding: TEXT (JSON строка)
-        - status: TEXT (pending, completed, cancelled)
-        - card_id: TEXT (ссылка на созданную карточку)
-        - created_at: TIMESTAMP
-        - expires_at: TIMESTAMP (для автоочистки)
-    """
+    """CRUD для временных загрузок (Two-Phase Commit)."""
     
     def __init__(self, db_path: str = DB_PATH):
-        """
-        Args:
-            db_path: Путь к SQLite базе данных
-        """
         self.db_path = db_path
         self._ensure_table_exists()
     
@@ -112,17 +74,16 @@ class UploadService:
                 status TEXT DEFAULT 'pending',
                 card_id TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                expires_at TIMESTAMP NOT NULL
+                expires_at TIMESTAMP NOT NULL,
+                FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
             )
         ''')
         
-        # Индекс для быстрой очистки просроченных записей
         cursor.execute('''
             CREATE INDEX IF NOT EXISTS idx_uploads_status_expires 
             ON uploads(status, expires_at)
         ''')
         
-        # Индекс для поиска по project_id
         cursor.execute('''
             CREATE INDEX IF NOT EXISTS idx_uploads_project 
             ON uploads(project_id)
@@ -139,22 +100,12 @@ class UploadService:
         embedding: Any,
         expiry_hours: int = UPLOAD_EXPIRY_HOURS
     ) -> int:
-        """
-        Создать временную загрузку (Шаг 1 Two-Phase Commit).
+        """CREATE: Создать временную загрузку."""
+        # 🔥 ВАЛИДАЦИЯ ПРОЕКТА через card_service
+        project = get_project_by_id(project_id, db_path=self.db_path)
+        if not project:
+            raise ValueError(f"Проект с ID={project_id} не найден")
         
-        Args:
-            project_id: ID проекта (для изоляции)
-            file_path: Путь к файлу кропа брюшка
-            embedding: Вектор эмбеддинга (np.ndarray или list)
-            expiry_hours: Время жизни загрузки (часы)
-        
-        Returns:
-            int: upload_id для использования в Шаге 2
-        
-        Raises:
-            ValueError: Если embedding пустой
-        """
-        # Валидация embedding
         if embedding is None or len(embedding) == 0:
             raise ValueError("Embedding не может быть пустым")
         
@@ -174,7 +125,7 @@ class UploadService:
             upload_id = cursor.lastrowid
             conn.commit()
             
-            logger.info(f"Создана загрузка {upload_id} (проект {project_id}, истекает {expires_at})")
+            logger.info(f"Создана загрузка {upload_id} (проект {project['name']}, истекает {expires_at})")
             return upload_id
             
         except Exception as e:
@@ -185,25 +136,7 @@ class UploadService:
             conn.close()
     
     def get_upload(self, upload_id: int) -> Optional[Dict[str, Any]]:
-        """
-        Получить данные временной загрузки по ID.
-        
-        Args:
-            upload_id: ID загрузки
-        
-        Returns:
-            Dict с данными загрузки или None если не найдена
-            {
-                'id': int,
-                'project_id': int,
-                'file_path': str,
-                'embedding': list[float],  # Уже десериализован
-                'status': str,
-                'card_id': str | None,
-                'created_at': str,
-                'expires_at': str
-            }
-        """
+        """READ: Получить загрузку по ID."""
         conn = get_db_connection(self.db_path)
         cursor = conn.cursor()
         
@@ -220,23 +153,13 @@ class UploadService:
             logger.warning(f"Загрузка {upload_id} не найдена")
             return None
         
-        # Десериализация embedding
         result = dict(row)
         result['embedding'] = deserialize_embedding(row['embedding'])
         
         return result
     
     def complete_upload(self, upload_id: int, card_id: str) -> bool:
-        """
-        Пометить загрузку как завершённую (после успешного создания карточки).
-        
-        Args:
-            upload_id: ID загрузки
-            card_id: ID созданной карточки (individual_id)
-        
-        Returns:
-            bool: True если успешно
-        """
+        """UPDATE: Завершить загрузку."""
         conn = get_db_connection(self.db_path)
         cursor = conn.cursor()
         
@@ -264,15 +187,7 @@ class UploadService:
             conn.close()
     
     def cancel_upload(self, upload_id: int) -> bool:
-        """
-        Отменить временную загрузку (пользователь отменил решение).
-        
-        Args:
-            upload_id: ID загрузки
-        
-        Returns:
-            bool: True если успешно
-        """
+        """UPDATE: Отменить загрузку."""
         conn = get_db_connection(self.db_path)
         cursor = conn.cursor()
         
@@ -300,14 +215,7 @@ class UploadService:
             conn.close()
     
     def cleanup_expired(self) -> int:
-        """
-        Удалить просроченные загрузки (фоновая задача).
-        
-        Вызывайте периодически (например, раз в час) для очистки базы.
-        
-        Returns:
-            int: Количество удалённых записей
-        """
+        """DELETE: Удалить просроченные загрузки."""
         conn = get_db_connection(self.db_path)
         cursor = conn.cursor()
         
@@ -335,15 +243,7 @@ class UploadService:
             conn.close()
     
     def get_pending_uploads(self, project_id: Optional[int] = None) -> List[Dict[str, Any]]:
-        """
-        Получить все активные (pending) загрузки.
-        
-        Args:
-            project_id: Фильтр по проекту (если None, все проекты)
-        
-        Returns:
-            List[Dict]: Список загрузок
-        """
+        """READ: Получить все активные (pending) загрузки."""
         conn = get_db_connection(self.db_path)
         cursor = conn.cursor()
         
@@ -365,7 +265,6 @@ class UploadService:
         rows = cursor.fetchall()
         conn.close()
         
-        # Десериализация embedding
         results = []
         for row in rows:
             result = dict(row)
@@ -375,22 +274,15 @@ class UploadService:
         return results
     
     def get_stats(self) -> Dict[str, Any]:
-        """
-        Получить статистику по загрузкам.
-        
-        Returns:
-            Dict со статистикой
-        """
+        """READ: Получить статистику по загрузкам."""
         conn = get_db_connection(self.db_path)
         cursor = conn.cursor()
         
         stats = {}
         
-        # Общее количество
         cursor.execute('SELECT COUNT(*) FROM uploads')
         stats['total'] = cursor.fetchone()[0]
         
-        # По статусам
         cursor.execute('''
             SELECT status, COUNT(*) 
             FROM uploads 
@@ -398,7 +290,6 @@ class UploadService:
         ''')
         stats['by_status'] = {row['status']: row[1] for row in cursor.fetchall()}
         
-        # Просроченные (ещё не удалённые)
         cursor.execute('''
             SELECT COUNT(*) 
             FROM uploads 

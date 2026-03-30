@@ -6,7 +6,7 @@ services/identification_service.py — Оркестратор идентифик
     2. Two-Phase Commit: identify_and_prepare() → confirm_decision()
     3. Прототипы вычисляются здесь (требует доступа к БД)
     4. EmbeddingService — только хранение/поиск векторов (нет БД)
-    5. Конфигурация через dict
+    5. 🔥 ИЗМЕНЕНО: Работа с project_id (FK), не project_name (TEXT)
 
 Зависимости:
     - pipeline/deployment_yolo_new.py — сегментация
@@ -26,11 +26,15 @@ from torchvision import transforms
 import sqlite3
 
 from pipeline.deployment_yolo_new import process_single_image_sync
-from pipeline.deployment_vit_faiss import load_model, get_embedding, EnhancedTripletNet, DEFAULT_TRANSFORM
+from pipeline.deployment_vit_faiss import load_model, get_embedding, EnhancedTripletNet, DEFAULT_TRANSFORM, search_vectors
 from services.embedding_service import EmbeddingService
 from services.card_service import CardService
 from services.upload_service import UploadService
 from database.card_database import DB_PATH
+
+# =============================================================================
+# ЛОГГЕР
+# =============================================================================
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +57,11 @@ class IdentificationService:
         1. identify_and_prepare() → анализ, создание uploads, поиск
         2. Пользователь принимает решение (NEW / MATCH / CANCEL)
         3. confirm_decision() → завершение (карточка + FAISS)
+    
+    🔥 ИЗМЕНЕНИЯ:
+        - project_id (INTEGER, FK) вместо project_name (TEXT)
+        - Фильтрация прототипов по project_id
+        - Валидация проекта через upload_service
     """
     
     def __init__(
@@ -102,12 +111,12 @@ class IdentificationService:
             1. YOLO сегментация → кроп брюшка
             2. ViT инференс → эмбеддинг
             3. Создание временной загрузки (uploads)
-            4. Поиск похожих особей (по прототипам)
+            4. Поиск похожих особей (по прототипам, фильтр по project_id)
             5. Сохранение кропа на диск (для архива)
         
         Args:
             image_path: Путь к исходной фотографии
-            project_id: ID проекта (для изоляции поиска)
+            project_id: ID проекта (для изоляции поиска) 🔥 FK
             top_k: Количество кандидатов для возврата
             debug: Сохранять ли debug-артефакты YOLO
         
@@ -143,14 +152,13 @@ class IdentificationService:
                 final_size=self.config.get('seg-model', {}).get('final_size', 244),
                 seg_model_path=self.config.get('seg-model', {}).get('path', 'models/best_seg.pt'),
                 debug=debug,
-                return_array=True
+                return_array=False  # Сохраняем на диск для архива
             )
             
             if not yolo_result['success']:
                 result['error'] = f"YOLO сегментация не удалась: {yolo_result.get('error', 'Unknown')}"
                 return result
             
-            crop_array = yolo_result['crop_array']
             crop_path = yolo_result['crop_path']
             result['crop_path'] = crop_path
             
@@ -158,7 +166,7 @@ class IdentificationService:
             logger.info(f"Вычисление эмбеддинга: {Path(crop_path).name}")
             
             embedding = get_embedding(
-                crop_path,  # ← Используем путь к файлу (get_embedding принимает path)
+                crop_path,
                 self.vit_model,
                 self.transform,
                 self.device
@@ -171,29 +179,27 @@ class IdentificationService:
             result['embedding'] = embedding
             
             # === 3. СОЗДАНИЕ ВРЕМЕННОЙ ЗАГРУЗКИ ===
-            logger.info(f"Создание загрузки (проект {project_id})")
+            logger.info(f"Создание загрузки (проект ID={project_id})")
             
             upload_id = self.upload_service.create_upload(
-                project_id=project_id,
+                project_id=project_id,  # 🔥 FK, валидация внутри upload_service
                 file_path=crop_path,
                 embedding=embedding
             )
             
             result['upload_id'] = upload_id
             
-            # === 4. ПОИСК ПОХОЖИХ (по прототипам) ===
-            logger.info(f"Поиск похожих (top_k={top_k})")
+            # === 4. ПОИСК ПОХОЖИХ (по прототипам, фильтр по project_id) ===
+            logger.info(f"Поиск похожих (top_k={top_k}, project_id={project_id})")
             
             prototypes = self._load_prototypes(project_id)
             
-            candidates = 0
             if prototypes['individual_ids']:
-                print("Нашли")
+                logger.info(f"Найдено {len(prototypes['individual_ids'])} особей для поиска")
                 candidates = self._search_similar(embedding, prototypes, top_k)
                 result['candidates'] = candidates
             else:
-                print("Не нашли, новая база")
-                logger.info("В базе нет особей для поиска (новая база)")
+                logger.info("В базе нет особей для поиска (новая база или пустой проект)")
                 result['candidates'] = []
             
             result['success'] = True
@@ -225,9 +231,6 @@ class IdentificationService:
         Args:
             upload_id: ID временной загрузки (из identify_and_prepare)
             decision: Решение пользователя ('NEW', 'MATCH', 'CANCEL')
-                'NEW' - новая особь
-                'MATCH' - повторная встреча
-                'CANCEL' - отмена операции
             card_data: Данные карточки (для NEW)
             existing_card_id: ID существующей особи (для MATCH)
         
@@ -311,16 +314,13 @@ class IdentificationService:
         # Извлечь embedding из загрузки
         embedding = np.array(upload['embedding'], dtype='float32')
         crop_path = upload['file_path']
-        project_id = upload['project_id']
-        
-        # Получить project_name из project_id (через БД или конфиг)
-        # Для простоты используем номер проекта как имя
-        project_name = f"Project_{project_id}"
+        project_id = upload['project_id']  # 🔥 Уже есть project_id
         
         # Создать карточку через card_service (БЕЗ FAISS)
+        # 🔥 Передаём project_id, card_service сам получит project_name если нужно
         individual_id = self.card_service.save_new_individual(
             photo_path_cropped=crop_path,
-            project_name=project_name,
+            project_id=project_id,  # 🔥 FK
             add_to_faiss=False,  # ← FAISS добавляем отдельно
             **card_data
         )
@@ -404,12 +404,6 @@ class IdentificationService:
         """
         Загрузить прототипы особей (средние эмбеддинги) из БД + FAISS.
         
-        ЛОГИКА:
-            1. Получить все photo с embedding_index из БД
-            2. Сгруппировать по individual_id
-            3. Извлечь векторы из FAISS
-            4. Вычислить средний эмбеддинг на особь
-        
         Args:
             project_id: Фильтр по проекту (если None, все проекты)
         
@@ -423,24 +417,28 @@ class IdentificationService:
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
         
-        # Получить все фото с embedding_index
-        # (фильтрация по проекту через JOIN с individuals)
+        # 🔥 ИЗМЕНЕНО: Добавлен JOIN с projects для получения project_name
         if project_id:
-            # Используем project_name для фильтрации
             cursor.execute('''
-                SELECT p.photo_id, p.individual_id, p.embedding_index, i.species, i.template_type, i.project_name
+                SELECT p.photo_id, p.individual_id, p.embedding_index, 
+                    i.species, i.template_type, i.project_id,
+                    pr.name as project_name  -- 🔥 Получаем имя проекта
                 FROM photos p
                 JOIN individuals i ON p.individual_id = i.individual_id
+                LEFT JOIN projects pr ON i.project_id = pr.id  -- 🔥 JOIN с projects
                 WHERE p.embedding_index != -1
                 AND p.photo_type = 'cropped'
-                AND i.project_name LIKE ?
+                AND i.project_id = ?
                 ORDER BY p.individual_id, p.photo_id
-            ''', (f"%{project_id}%",))
+            ''', (project_id,))
         else:
             cursor.execute('''
-                SELECT p.photo_id, p.individual_id, p.embedding_index, i.species, i.template_type, i.project_name
+                SELECT p.photo_id, p.individual_id, p.embedding_index, 
+                    i.species, i.template_type, i.project_id,
+                    pr.name as project_name
                 FROM photos p
                 JOIN individuals i ON p.individual_id = i.individual_id
+                LEFT JOIN projects pr ON i.project_id = pr.id
                 WHERE p.embedding_index != -1
                 AND p.photo_type = 'cropped'
                 ORDER BY p.individual_id, p.photo_id
@@ -467,7 +465,8 @@ class IdentificationService:
                 metadata[ind_id] = {
                     'species': row['species'],
                     'template_type': row['template_type'],
-                    'project_name': row['project_name']
+                    'project_id': row['project_id'],  # 🔥 project_id
+                    'project_name': row['project_name']  # 🔥 Теперь это работает
                 }
             groups[ind_id].append({
                 'embedding_index': row['embedding_index']
@@ -499,9 +498,13 @@ class IdentificationService:
                 individual_ids.append(ind_id)
                 prototype_embeddings.append(prototype)
         
+        # Диагностика
+        embeddings_array = np.array(prototype_embeddings) if prototype_embeddings else np.array([])
+        logger.info(f"Загружено прототипов: {len(individual_ids)}, форма: {embeddings_array.shape}")
+        
         return {
             'individual_ids': individual_ids,
-            'embeddings': np.array(prototype_embeddings) if prototype_embeddings else np.array([]),
+            'embeddings': embeddings_array,
             'metadata': metadata
         }
     
@@ -526,8 +529,6 @@ class IdentificationService:
             return []
         
         # Поиск через pipeline (чистая математика)
-        from pipeline.deployment_vit_faiss import search_vectors
-        
         results = search_vectors(
             query_embedding=query_embedding,
             reference_embeddings=prototypes['embeddings'],
@@ -544,7 +545,7 @@ class IdentificationService:
                 'individual_id': ind_id,
                 'species': meta.get('species', 'Unknown'),
                 'template_type': meta.get('template_type', 'Unknown'),
-                'project_name': meta.get('project_name', 'Unknown'),
+                'project_name': meta.get('project_name', 'Unknown'),  # Для отображения
                 'similarity': similarity,
                 'similarity_percent': similarity * 100
             })

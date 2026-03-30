@@ -303,7 +303,7 @@ def search_vectors(
     query_embedding: np.ndarray,
     reference_embeddings: np.ndarray,
     top_k: int = 5
-) -> List[Tuple[int, float]]:
+) -> list[tuple[int, float]]:
     """
     Поиск похожих векторов через косинусное сходство (чистая numpy математика).
     
@@ -343,7 +343,7 @@ def search_vectors(
     
     # Топ-K индексов по убыванию схожести
     top_indices = np.argsort(similarities)[::-1][:top_k]
-    
+    print(top_indices, len(reference_embeddings))
     # Формирование результатов
     results = []
     for idx in top_indices:
