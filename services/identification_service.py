@@ -36,6 +36,7 @@ from database.card_database import DB_PATH
 # ЛОГГЕР
 # =============================================================================
 
+logging.basicConfig(level=logging.INFO, format='%(asctime)s – %(name)s – %(levelname)s – %(message)s')
 logger = logging.getLogger(__name__)
 
 # =============================================================================
@@ -142,7 +143,7 @@ class IdentificationService:
             # === 1. YOLO СЕГМЕНТАЦИЯ ===
             logger.info(f"Сегментация: {Path(image_path).name}")
             
-            output_dir = self.config.get('io', {}).get('output_folder', 'output/temp')
+            output_dir = self.config.get('db', {}).get('cropped_folder', 'cropped/temp')
             
             yolo_result = process_single_image_sync(
                 img_path=image_path,

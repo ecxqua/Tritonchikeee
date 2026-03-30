@@ -406,7 +406,7 @@ async def process_single_image(
         if return_array:
             result['crop_array'] = unwrapped
 
-        # Сохранение на диск (только для архива, не для pipeline!)
+        # Сохранение на диск для дальнейшей обработки.
         if output_dir:
             os.makedirs(output_dir, exist_ok=True)
             save_path = os.path.join(output_dir, "image_cropped.jpg")

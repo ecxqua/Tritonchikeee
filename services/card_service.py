@@ -215,11 +215,10 @@ class CardService:
     
     def save_new_individual(
         self,
-        photo_path_full: Optional[str] = None,
+        photo_path_full: Optional[str] = None,  # Обычно не исп.
         photo_path_cropped: Optional[str] = None,
         species: str = "Карелина",
-        project_id: Optional[int] = None,  # 🔥 ИЗМЕНЕНО: project_id вместо project_name
-        project_name: Optional[str] = None,  # Для обратной совместимости
+        project_id: Optional[int] = None,
         template_type: str = "ИК-1",
         individual_id: Optional[str] = None,
         photo_number: Optional[str] = None,
@@ -233,17 +232,15 @@ class CardService:
         conn = get_db_connection(self.db_path)
         cursor = conn.cursor()
         
-        # 🔥 ОПРЕДЕЛЕНИЕ PROJECT_ID
-        if project_id is None:
-            if project_name:
-                project_id = get_or_create_project(project_name, db_path=self.db_path)
-                logger.info(f"Использован проект: '{project_name}' (ID={project_id})")
-            else:
-                project_id = get_or_create_project("Основной", db_path=self.db_path)
-                logger.info(f"Использован проект по умолчанию: 'Основной' (ID={project_id})")
-        
         if individual_id is None:
-            individual_id = f"NT-{datetime.now().strftime('%y%m%d%H%M%S')}"
+            individual_id = generate_card_id(cursor, species, template_type)
+        file_suffix = Path(photo_path_cropped).suffix
+        file_parent = str(Path(photo_path_cropped).parent)
+        logger.info("Родительская папка сохранённого кропа: " + file_parent)
+        photo_path_cropped = str(Path(photo_path_cropped).rename(
+            f"{file_parent}\{individual_id}{file_suffix}"
+        ))
+        logger.info("Сохранённый кроп: " + photo_path_cropped)
         
         if photo_number is None:
             photo_number = _get_next_photo_number(cursor, individual_id)
@@ -279,6 +276,7 @@ class CardService:
             ))
             
             # === ТАБЛИЦА 2: photos (полное фото) ===
+            # P.S. Мы не используем полное фото обычно.
             if photo_path_full and not is_legacy:
                 cursor.execute('''
                     INSERT INTO photos (

@@ -1,6 +1,3 @@
-io:
-  output_folder: "data/output/" # Папка для результатов и артефактов дебага
-
 models:
   path: "models/"
 

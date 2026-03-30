@@ -7,7 +7,8 @@ service = create_identification_service()
 result = service.identify_and_prepare(
     image_path="data/input/image3.jpg",
     project_id=1,
-    top_k=5
+    top_k=5,
+    debug=True
 )
 
 print(result["candidates"])
@@ -18,20 +19,20 @@ if result['success']:
     
     # 3. Пользователь видит кандидатов и принимает решение
     
-    # 4. Шаг 2: Подтверждение (НОВАЯ)
-    # confirm = service.confirm_decision(
-    #     upload_id=result['upload_id'],
-    #     decision='NEW',
-    #     card_data ={
-    #         'species': 'Карелина',
-    #         'template_type': 'ИК-1',
-    #         'length_body': 42.5,
-    #         'weight': 3.2,
-    #         'sex': 'М'
-    #     }
-    # )
+    # 4. Шаг 2: Подтверждение (НОВАЯ ОСОБЬ)
+    confirm = service.confirm_decision(
+        upload_id=result['upload_id'],
+        decision='NEW',
+        card_data ={
+            'species': 'Карелина',
+            'template_type': 'ИК-1',
+            'length_body': 42.5,
+            'weight': 3.2,
+            'sex': 'М'
+        }
+    )
     
-    # # Или (ПОВТОРНАЯ)
+    # # Или (ПОВТОРНАЯ ВСТРЕЧА)
     # confirm = service.confirm_decision(
     #     upload_id=result['upload_id'],
     #     decision='MATCH',
