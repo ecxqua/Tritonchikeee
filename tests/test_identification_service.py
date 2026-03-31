@@ -1,7 +1,12 @@
 from services.identification_service import create_identification_service
+import time
+
 
 # 1. Инициализация
 service = create_identification_service()
+
+print("Старт обработки")
+start_time = time.time()
 
 # 2. Шаг 1: Анализ
 result = service.identify_and_prepare(
@@ -19,18 +24,18 @@ if result['success']:
     
     # 3. Пользователь видит кандидатов и принимает решение
     
-    # 4. Шаг 2: Подтверждение (НОВАЯ ОСОБЬ)
-    confirm = service.confirm_decision(
-        upload_id=result['upload_id'],
-        decision='NEW',
-        card_data ={
-            'species': 'Карелина',
-            'template_type': 'ИК-1',
-            'length_body': 55,
-            'weight': 3.22,
-            'sex': 'М'
-        }
-    )
+    # # 4. Шаг 2: Подтверждение (НОВАЯ ОСОБЬ)
+    # confirm = service.confirm_decision(
+    #     upload_id=result['upload_id'],
+    #     decision='NEW',
+    #     card_data ={
+    #         'species': 'Карелина',
+    #         'template_type': 'ИК-1',
+    #         'length_body': 55,
+    #         'weight': 3.22,
+    #         'sex': 'М'
+    #     }
+    # )
     
     # # Или (ПОВТОРНАЯ ВСТРЕЧА)
     # confirm = service.confirm_decision(
@@ -40,7 +45,9 @@ if result['success']:
     #     card_data={'status': 'жив'}
     # )
 
-    # confirm = service.confirm_decision(
-    #     upload_id=result['upload_id'],
-    #     decision='CANCEL'
-    # )
+    confirm = service.confirm_decision(
+        upload_id=result['upload_id'],
+        decision='CANCEL'
+    )
+
+print("Финальное время обработки: ", time.time() - start_time)

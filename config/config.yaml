@@ -20,7 +20,7 @@ db:
   db_path: "database/cards.db"
   faiss_index_path: "data/embeddings/database_embeddings.pkl"
   cropped_folder: "data/cropped/"
-  "expiry_hours": 0.01  # Через сколько просрочиваются записи в uploads
+  "expiry_hours": 0.00001  # Через сколько просрочиваются записи в uploads
 
 view:
   size_answer: 5  # Размер рейтинга (теперь неактивно, меняется в аргументах во входе)

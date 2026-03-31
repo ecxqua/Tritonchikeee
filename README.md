@@ -35,7 +35,7 @@
 
 Если вы хотите обнулить все базы, то выполните следующие шаги:
 1. Удалите `database/cards.sqlite3` и `data/embeddings/database_embeddings.pkl`.
-2. Выполните `bash launch.sh`
+2. Выполните `bash launch_db.sh`
 
 ### Docker-контейнеризация
 Контейнеры Docker не настроены.
