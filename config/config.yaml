@@ -7,7 +7,7 @@ seg-model:
   trim_top_pct: 0.3
   trim_bottom_pct: 0.15
   final_size: 244
-  debug: False
+  debug: False  # Неактивно, меняется в аргументах
 
 # Конфигурация модели идентификации.
 id-model:
@@ -20,6 +20,7 @@ db:
   db_path: "database/cards.db"
   faiss_index_path: "data/embeddings/database_embeddings.pkl"
   cropped_folder: "data/cropped/"
+  "expiry_hours": 0.01  # Через сколько просрочиваются записи в uploads
 
 view:
   size_answer: 5  # Размер рейтинга (теперь неактивно, меняется в аргументах во входе)

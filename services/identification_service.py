@@ -4,9 +4,8 @@ services/identification_service.py — Оркестратор идентифик
 АРХИТЕКТУРНЫЕ ПРИНЦИПЫ:
     1. Единый вход для анализа (YOLO + ViT + FAISS + Upload)
     2. Two-Phase Commit: identify_and_prepare() → confirm_decision()
-    3. Прототипы вычисляются здесь (требует доступа к БД)
+    3. Прототипы (усреднённые эмбеддини) вычисляются здесь (требует доступа к БД)
     4. EmbeddingService — только хранение/поиск векторов (нет БД)
-    5. 🔥 ИЗМЕНЕНО: Работа с project_id (FK), не project_name (TEXT)
 
 Зависимости:
     - pipeline/deployment_yolo_new.py — сегментация
@@ -185,7 +184,8 @@ class IdentificationService:
             upload_id = self.upload_service.create_upload(
                 project_id=project_id,  # 🔥 FK, валидация внутри upload_service
                 file_path=crop_path,
-                embedding=embedding
+                embedding=embedding,
+                expiry_hours=self.config.get('db', {}).get('expiry_hours', 24)
             )
             
             result['upload_id'] = upload_id
@@ -296,6 +296,13 @@ class IdentificationService:
             import traceback
             traceback.print_exc()
             return result
+
+    # ==========================================================================
+    # Проекты
+    # ==========================================================================
+
+    def get_or_create_project(self, project_name: str, description: str) -> int:
+        pass
     
     def _handle_new_individual(
         self,

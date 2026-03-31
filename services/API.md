@@ -1,6 +1,15 @@
 # Ключевые точки для связки API
 
 ## `service/identification_service.py`
+### Инициализация сервиса.
+
+```python
+from services.identification_service import create_identification_service
+
+# 1. Инициализация
+service = create_identification_service()
+```
+
 ### Старт анализа фотографии
 Начинает операцию анализа фото, отдаёт информацию о схожести пути к кропам брюшек тритонов в топе.
 
@@ -29,13 +38,11 @@ confirm = service.confirm_decision(
     }
 )
 ```
-## `service/card_service.py`
-### Создать новый проект
-
+### Создание нового проекта или получение `project_id`
+Создаёт проект по названию и описанию или получает существующий из таблицы `projects`.
 ```python
-def get_or_create_project(
+project_id: int = service.get_or_create_project(
     project_name: str,
     description: str = None,
-    db_path: str = DB_PATH
-) -> int:
+)
 ```
