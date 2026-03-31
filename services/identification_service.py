@@ -1,16 +1,16 @@
 """
 services/identification_service.py — Оркестратор идентификации тритонов.
-Вход в приложение.
 
-БЫСТРЫЙ СТАРТ: 
-используйте функцию-фабрику в самом конце файла
-для работы с приложением в целом.
+Это главный вход в приложение для идентификации.
 
 АРХИТЕКТУРНЫЕ ПРИНЦИПЫ:
     1. Единый вход для анализа (YOLO + ViT + FAISS + Upload)
     2. Two-Phase Commit: identify_and_prepare() → confirm_decision()
-    3. Прототипы (усреднённые эмбеддини) вычисляются здесь (требует доступа к БД)
-    4. EmbeddingService — только хранение/поиск векторов (нет БД)
+    3. Прототипы (усреднённые эмбеддинги) вычисляются здесь
+    4. EmbeddingService — только хранение/поиск векторов
+
+ИСПОЛЬЗОВАНИЕ:
+    См. API.md
 
 Зависимости:
     - pipeline/deployment_yolo_new.py — сегментация
@@ -64,10 +64,9 @@ class IdentificationService:
         2. Пользователь принимает решение (NEW / MATCH / CANCEL)
         3. confirm_decision() → завершение (карточка + FAISS)
     
-    🔥 ИЗМЕНЕНИЯ:
-        - project_id (INTEGER, FK) вместо project_name (TEXT)
+    Работа с проектами:
+        - project_id (INTEGER, FK)
         - Фильтрация прототипов по project_id
-        - Валидация проекта через upload_service
     """
     
     def __init__(
