@@ -1,6 +1,10 @@
 """
 services/identification_service.py — Оркестратор идентификации тритонов.
 
+БЫСТРЫЙ СТАРТ: 
+используйте функцию-фабрику в самом конце файла
+для работы с идентификацией в целом.
+
 АРХИТЕКТУРНЫЕ ПРИНЦИПЫ:
     1. Единый вход для анализа (YOLO + ViT + FAISS + Upload)
     2. Two-Phase Commit: identify_and_prepare() → confirm_decision()
@@ -302,8 +306,40 @@ class IdentificationService:
     # ==========================================================================
 
     def get_or_create_project(self, project_name: str, description: str) -> int:
-        pass
-    
+        """Получает название проекта или создаёт новый.
+        
+        Args:
+            project_name: название проекта (существующее или новое).
+            description: описание проекта.
+
+        Returns:
+            int: существующий или созданный `project_id` проекта.
+        """
+        return self.card_service.get
+
+    # ==========================================================================
+    # Временные загрузки
+    # ==========================================================================
+    def cancel_upload(self, upload_id: int) -> bool:
+        """Отменяет загрузку по upload_id."""
+        return self.upload_service.cancel_upload(upload_id)
+
+    def cleanup_expired(self) -> int:
+        """
+        Очищает просроченные загрузки в uploads.
+        Для изменения expiry_hours см. `config.yaml`.
+
+        Returns:
+            int: число удалённых загрузок.
+        """
+        return self.upload_service.cleanup_expired()
+
+    # ==========================================================================
+    # Входы для внесения карточек о новой особи и повторной встречи.
+    # Объединение и управление card_service.py, upload_service.py
+    # и embedding_service.py
+    # ==========================================================================
+
     def _handle_new_individual(
         self,
         upload: Dict[str, Any],
@@ -394,6 +430,9 @@ class IdentificationService:
     
     # ==========================================================================
     # ВНУТРЕННИЕ МЕТОДЫ
+    # Многие из них выенесены сюда, потому что они не совсем имеют место
+    # в CRUD для бд или faiss. Это внутренняя логика идентификации типа построения
+    # усреднённых эмбеддингов, обновления embedding_index для фото в photos
     # ==========================================================================
     
     def _update_photo_embedding_index(self, photo_path: str, embedding_index: int):
@@ -562,6 +601,7 @@ class IdentificationService:
 
 # =============================================================================
 # FACTORY FUNCTION (для удобной инициализации)
+# Используйте фабрику для работы с идентификацией в целом.
 # =============================================================================
 
 def create_identification_service(config: Optional[Dict] = None) -> IdentificationService:
