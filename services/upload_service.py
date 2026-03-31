@@ -3,7 +3,7 @@ services/upload_service.py — CRUD для временных загрузок (
 
 Архитектурные принципы:
     1. ✅ CRUD для uploads только здесь
-    2. ✅ Валидация project_id через card_service.get_project_by_id()
+    2. ✅ Валидация осуществляется не в модуле, а вне
     3. ✅ Нет доступа к pipeline
     4. ✅ Автоочистка старых загрузок (expired)
 
@@ -19,7 +19,6 @@ from datetime import datetime, timedelta
 from typing import Optional, Dict, Any, List
 
 from database.card_database import DB_PATH
-from services.card_service import get_project_by_id  # 🔥 Валидация из card_service
 
 logger = logging.getLogger(__name__)
 
@@ -101,11 +100,6 @@ class UploadService:
         expiry_hours: int = UPLOAD_EXPIRY_HOURS
     ) -> int:
         """CREATE: Создать временную загрузку."""
-        # 🔥 ВАЛИДАЦИЯ ПРОЕКТА через card_service
-        project = get_project_by_id(project_id, db_path=self.db_path)
-        if not project:
-            raise ValueError(f"Проект с ID={project_id} не найден")
-        
         if embedding is None or len(embedding) == 0:
             raise ValueError("Embedding не может быть пустым")
         
@@ -125,7 +119,6 @@ class UploadService:
             upload_id = cursor.lastrowid
             conn.commit()
             
-            logger.info(f"Создана загрузка {upload_id} (проект {project['name']}, истекает {expires_at})")
             return upload_id
             
         except Exception as e:

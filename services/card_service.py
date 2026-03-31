@@ -1,16 +1,17 @@
 """
-services/card_service.py — CRUD операции для карточек особей и проектов.
+services/card_service.py — CRUD операции для карточек особей.
 
 Архитектурные принципы:
-    1. ✅ ВЕСЬ CRUD здесь (не в card_database.py)
-    2. ✅ project_id (INTEGER, FK → projects.id)
-    3. ✅ Нет прямого доступа к FAISS → EmbeddingService
-    4. ✅ Нет print() → используем logging
+    1. ✅ Только CRUD для individuals и photos (проекты — в project_service.py)
+    2. ✅ Нет прямого доступа к FAISS → вызываем EmbeddingService
+    3. ✅ Нет print() → используем logging
+    4. ✅ Нет хардкода путей → передаются через параметры
     5. ✅ Типизация → для поддержки в IDE и API
 
 Зависимости:
     - database/cards.db — SQLite база
     - services/embedding_service.py — для работы с FAISS
+    - services/project_service.py — для валидации проектов (опционально)
 """
 
 import logging
@@ -22,6 +23,7 @@ import numpy as np
 from typing import Optional, Dict, List, Any
 
 from database.card_database import DB_PATH
+from services.project_service import ProjectService  # Для валидации, если нужно
 
 logger = logging.getLogger(__name__)
 
@@ -111,103 +113,40 @@ def _get_next_photo_number(cursor: sqlite3.Cursor, individual_id: str) -> str:
     return f"{count + 1:02d}"
 
 # =============================================================================
-# PROJECT CRUD (Теперь здесь!)
-# =============================================================================
-
-def get_or_create_project(project_name: str, description: str = None, db_path: str = DB_PATH) -> int:
-    """
-    Получить ID проекта по имени или создать новый.
-    
-    Returns:
-        int: project_id
-    """
-    conn = get_db_connection(db_path)
-    cursor = conn.cursor()
-    
-    try:
-        cursor.execute('SELECT id FROM projects WHERE name = ?', (project_name,))
-        row = cursor.fetchone()
-        
-        if row:
-            return row['id']
-        
-        cursor.execute('''
-            INSERT INTO projects (name, description, created_at)
-            VALUES (?, ?, ?)
-        ''', (project_name, description, datetime.now().isoformat()))
-        
-        project_id = cursor.lastrowid
-        conn.commit()
-        return project_id
-        
-    finally:
-        conn.close()
-
-def get_project_by_id(project_id: int, db_path: str = DB_PATH) -> Optional[Dict[str, Any]]:
-    """Получить данные проекта по ID."""
-    conn = get_db_connection(db_path)
-    cursor = conn.cursor()
-    
-    try:
-        cursor.execute('SELECT * FROM projects WHERE id = ?', (project_id,))
-        row = cursor.fetchone()
-        return dict(row) if row else None
-    finally:
-        conn.close()
-
-def get_project_id_by_name(project_name: str, db_path: str = DB_PATH) -> Optional[int]:
-    """Получить ID проекта по имени."""
-    conn = get_db_connection(db_path)
-    cursor = conn.cursor()
-    
-    try:
-        cursor.execute('SELECT id FROM projects WHERE name = ?', (project_name,))
-        row = cursor.fetchone()
-        return row['id'] if row else None
-    finally:
-        conn.close()
-
-def list_projects(active_only: bool = True, db_path: str = DB_PATH) -> List[Dict[str, Any]]:
-    """Получить список всех проектов."""
-    conn = get_db_connection(db_path)
-    cursor = conn.cursor()
-    
-    try:
-        if active_only:
-            cursor.execute('''
-                SELECT id, name, description, created_at
-                FROM projects
-                WHERE is_active = 1
-                ORDER BY name
-            ''')
-        else:
-            cursor.execute('''
-                SELECT id, name, description, is_active, created_at
-                FROM projects
-                ORDER BY name
-            ''')
-        return [dict(row) for row in cursor.fetchall()]
-    finally:
-        conn.close()
-
-# =============================================================================
 # CARD SERVICE — Основная бизнес-логика
 # =============================================================================
 
 class CardService:
-    """Универсальный CRUD для управления карточками особей."""
+    """
+    Универсальный CRUD для управления карточками особей.
+    
+    ВАЖНО: Для работы с FAISS использует EmbeddingService (не напрямую).
+    Это обеспечивает синхронизацию БД и индекса.
+    """
     
     def __init__(
         self, 
         db_path: str = DB_PATH,
-        embedding_service: Optional[Any] = None
+        embedding_service: Optional[Any] = None,
+        project_service: Optional[ProjectService] = None
     ):
+        """
+        Args:
+            db_path: Путь к SQLite базе
+            embedding_service: Экземпляр EmbeddingService для работы с FAISS
+            project_service: Экземпляр ProjectService (опционально, для валидации)
+        """
         self.db_path = db_path
         self.embedding_service = embedding_service
+        self.project_service = project_service
     
     def set_embedding_service(self, embedding_service: Any) -> None:
         """Установить сервис для работы с FAISS (dependency injection)."""
         self.embedding_service = embedding_service
+    
+    def set_project_service(self, project_service: ProjectService) -> None:
+        """Установить сервис для работы с проектами (dependency injection)."""
+        self.project_service = project_service
     
     # -------------------------------------------------------------------------
     # CREATE
@@ -223,7 +162,6 @@ class CardService:
         individual_id: Optional[str] = None,
         photo_number: Optional[str] = None,
         is_legacy: bool = False,
-        add_to_faiss: bool = True,
         **card_data
     ) -> str:
         """Сохраняет новую особь в базу данных (карточка + фотографии)."""
@@ -305,35 +243,13 @@ class CardService:
                     -1,
                     1 if is_legacy else 0
                 ))
-                
-                # === FAISS: Добавляем через EmbeddingService ===
-                if add_to_faiss and self.embedding_service:
-                    try:
-                        embedding = self.embedding_service.compute_embedding(photo_path_cropped)
-                        embedding_index = self.embedding_service.add(embedding, {
-                            'individual_id': individual_id,
-                            'photo_path': photo_path_cropped,
-                            'template_type': template_type,
-                            'species': species
-                        })
-                        self._update_photo_embedding_index(cursor, photo_path_cropped, embedding_index)
-                        logger.info(f"Добавлено в FAISS: индекс {embedding_index}")
-                    except Exception as faiss_error:
-                        logger.warning(f"Ошибка добавления в FAISS: {faiss_error}")
             
             conn.commit()
-            
-            # === FAISS: Сохраняем индекс ПОСЛЕ commit БД ===
-            if add_to_faiss and self.embedding_service:
-                self.embedding_service.commit()
-            
+
             logger.info(f"Особь сохранена: {individual_id} ({template_type})")
             return individual_id
-            
         except Exception as e:
             conn.rollback()
-            if add_to_faiss and self.embedding_service:
-                self.embedding_service.rollback()
             logger.error(f"Ошибка сохранения особи: {e}")
             raise e
         finally:
@@ -369,7 +285,7 @@ class CardService:
         embedding = np.array(embedding, dtype='float32')
         
         photo_path_cropped = upload['file_path']
-        project_id = upload['project_id']  # 🔥 Уже есть project_id из uploads
+        project_id = upload['project_id']
         
         # 3. Генерируем ID
         individual_id = generate_card_id(cursor, species, template_type)
@@ -456,7 +372,6 @@ class CardService:
         template_type: str,
         photo_path_full: Optional[str] = None,
         photo_path_cropped: Optional[str] = None,
-        add_to_faiss: bool = True,
         **card_data
     ) -> str:
         """Добавляет НОВУЮ ВСТРЕЧУ (КВ-1/КВ-2) для существующей особи."""
@@ -504,32 +419,14 @@ class CardService:
                     INSERT INTO photos (individual_id, photo_type, photo_number, photo_path, date_taken, is_main, is_processed, embedding_index, is_legacy)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ''', (individual_id, 'cropped', photo_number, photo_path_cropped, card_data.get('date'), 0, 1, -1, 0))
-                
-                if add_to_faiss and self.embedding_service:
-                    try:
-                        embedding = self.embedding_service.compute_embedding(photo_path_cropped)
-                        embedding_index = self.embedding_service.add(embedding, {
-                            'individual_id': individual_id,
-                            'photo_path': photo_path_cropped,
-                            'template_type': template_type
-                        })
-                        self._update_photo_embedding_index(cursor, photo_path_cropped, embedding_index)
-                        logger.info(f"Добавлено в FAISS: индекс {embedding_index}")
-                    except Exception as faiss_error:
-                        logger.warning(f"Ошибка добавления в FAISS: {faiss_error}")
             
             conn.commit()
-            
-            if add_to_faiss and self.embedding_service:
-                self.embedding_service.commit()
             
             logger.info(f"Встреча {template_type} добавлена к особи {individual_id}")
             return photo_number
             
         except Exception as e:
             conn.rollback()
-            if add_to_faiss and self.embedding_service:
-                self.embedding_service.rollback()
             logger.error(f"Ошибка добавления встречи: {e}")
             raise e
         finally:
@@ -631,7 +528,7 @@ class CardService:
         conn = get_db_connection(self.db_path)
         cursor = conn.cursor()
         
-        # 🔥 JOIN с projects для получения названия проекта
+        # JOIN с projects для получения названия проекта
         cursor.execute('''
             SELECT i.*, p.name as project_name
             FROM individuals i

@@ -26,8 +26,8 @@ if result['success']:
         card_data ={
             'species': 'Карелина',
             'template_type': 'ИК-1',
-            'length_body': 42.5,
-            'weight': 3.2,
+            'length_body': 55,
+            'weight': 3.22,
             'sex': 'М'
         }
     )
@@ -38,4 +38,9 @@ if result['success']:
     #     decision='MATCH',
     #     existing_card_id='NT-K-1-ИК 1',
     #     card_data={'status': 'жив'}
+    # )
+
+    # confirm = service.confirm_decision(
+    #     upload_id=result['upload_id'],
+    #     decision='CANCEL'
     # )

@@ -1,9 +1,10 @@
 """
 services/identification_service.py — Оркестратор идентификации тритонов.
+Вход в приложение.
 
 БЫСТРЫЙ СТАРТ: 
 используйте функцию-фабрику в самом конце файла
-для работы с идентификацией в целом.
+для работы с приложением в целом.
 
 АРХИТЕКТУРНЫЕ ПРИНЦИПЫ:
     1. Единый вход для анализа (YOLO + ViT + FAISS + Upload)
@@ -33,6 +34,7 @@ from pipeline.deployment_vit_faiss import load_model, get_embedding, EnhancedTri
 from services.embedding_service import EmbeddingService
 from services.card_service import CardService
 from services.upload_service import UploadService
+from services.project_service import ProjectService
 from database.card_database import DB_PATH
 
 # =============================================================================
@@ -74,6 +76,7 @@ class IdentificationService:
         embedding_service: EmbeddingService,
         card_service: CardService,
         upload_service: UploadService,
+        project_service: ProjectService,
         device: Optional[torch.device] = None
     ):
         """
@@ -88,6 +91,7 @@ class IdentificationService:
         self.embedding_service = embedding_service
         self.card_service = card_service
         self.upload_service = upload_service
+        self.project_service = project_service
         self.device = device or torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         
         # Загрузка ViT модели (один раз при инициализации)
@@ -143,6 +147,11 @@ class IdentificationService:
         }
         
         try:
+            # Валидация проекта
+            project = self.project_service.get_project_by_id(project_id)
+            if not project:
+                raise ValueError(f"Проект с ID={project_id} не найден")
+
             # === 1. YOLO СЕГМЕНТАЦИЯ ===
             logger.info(f"Сегментация: {Path(image_path).name}")
             
@@ -313,16 +322,64 @@ class IdentificationService:
             description: описание проекта.
 
         Returns:
-            int: существующий или созданный `project_id` проекта.
+            int: существующий или созданный project_id проекта.
         """
-        return self.card_service.get
+        return self.project_service.get_or_create_project(
+            name=project_name,
+            description=description
+        )
+
+    def get_project_by_id(self, project_id: int) -> Optional[Dict[str, Any]]:
+        """Получает метаданные проекта по project_id в таблице projects."""
+        return self.project_service.get_project_by_id(project_id=project_id)
+
+    def get_project_id_by_name(self, project_name: str) -> Optional[int]:
+        """Получает метаданные проекта по project_name в таблице projects."""
+        return self.project_service.get_project_id_by_name(project_name=project_name)
+
+    def update_project(
+        self,
+        project_id: int,
+        **kwargs
+    ) -> bool:
+        """Обновляет поля проекта в таблице projects.
+        
+        Args:
+            project_id: id проекта в таблице projects.
+        """
+        return self.project_service.update_project(project_id=project_id, kwargs=kwargs)
+
+    def delete_project(self, project_id: int, confirm: bool = False) -> bool:
+        """Удаляет проект по project_id из таблицы projects.
+        
+        Args:
+            project_id: id проекта в таблице.
+            confirm: подтверждение удаления, по умолчанию False.
+
+        Returns:
+            bool: успешное выполнение операции.
+        """
+        return self.project_service.delete_project(
+            project_id=project_id,
+            confirm=confirm
+        )
+
+    def list_projects(self, active_only: bool = True) -> List[Dict[str, Any]]:
+        """Список проектов с метаданными из таблицы projects.
+
+        Args:
+            active_only: передать только проекты с меткой active.
+
+        Returns:
+            list[dict]: список проектов с доступом к полям (чтение)."""
+        return self.project_service.list_projects(active_only=active_only)
 
     # ==========================================================================
     # Временные загрузки
     # ==========================================================================
-    def cancel_upload(self, upload_id: int) -> bool:
-        """Отменяет загрузку по upload_id."""
-        return self.upload_service.cancel_upload(upload_id)
+    # def cancel_upload(self, upload_id: int) -> bool:
+    #     """Отменяет загрузку по upload_id."""
+    #     return self.upload_service.cancel_upload(upload_id)
 
     def cleanup_expired(self) -> int:
         """
@@ -365,7 +422,6 @@ class IdentificationService:
         individual_id = self.card_service.save_new_individual(
             photo_path_cropped=crop_path,
             project_id=project_id,  # 🔥 FK
-            add_to_faiss=False,  # ← FAISS добавляем отдельно
             **card_data
         )
         
@@ -409,7 +465,6 @@ class IdentificationService:
             individual_id=existing_card_id,
             template_type=card_data.get('template_type', 'КВ-1'),
             photo_path_cropped=crop_path,
-            add_to_faiss=False,  # ← FAISS добавляем отдельно
             **card_data
         )
         
@@ -618,27 +673,37 @@ def create_identification_service(config: Optional[Dict] = None) -> Identificati
     from services.embedding_service import EmbeddingService
     from services.card_service import CardService
     from services.upload_service import UploadService
+    from services.project_service import ProjectService
     
     if config is None:
         config = load_config()
+
+    DB_PATH = config.get('db', {}).get('db_path', 'database/cards.db')
+    INDEX_PATH = config.get('db', {}).get('faiss_index_path', 'data/embeddings/database_embeddings.pkl')
     
     # Инициализация сервисов
     embedding_service = EmbeddingService(
-        index_path=config.get('db', {}).get('faiss_index_path', 'data/embeddings/database_embeddings.pkl')
+        index_path=INDEX_PATH
+    )
+
+    project_service = ProjectService(
+        db_path=DB_PATH
     )
     
     card_service = CardService(
-        db_path=config.get('db', {}).get('db_path', 'database/cards.db'),
-        embedding_service=embedding_service
+        db_path=DB_PATH,
+        embedding_service=embedding_service,
+        project_service=project_service  # Опционально
     )
     
     upload_service = UploadService(
-        db_path=config.get('db', {}).get('db_path', 'database/cards.db')
+        db_path=DB_PATH
     )
     
     return IdentificationService(
         config=config,
         embedding_service=embedding_service,
         card_service=card_service,
-        upload_service=upload_service
+        upload_service=upload_service,
+        project_service=project_service
     )
