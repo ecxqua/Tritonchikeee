@@ -4,9 +4,8 @@ pipeline/deployment_yolo_new.py — Ядро сегментации брюшка
 
 АРХИТЕКТУРНЫЕ ИЗМЕНЕНИЯ:
     1. Debug-файлы → опционально (флаг debug=False по умолчанию)
-    2. Возврат numpy array → нет лишнего I/O (in-memory pipeline)
+    2. Возврат numpy array → нет лишнего I/O (in-memory pipeline) (TODO: требует подключения)
     3. Возвращаемый тип → Dict вместо bool (больше информации)
-    4. Логгирование → logging вместо print()
 
 Зависимости:
     - models/best_seg.pt — веса YOLO модели сегментации
