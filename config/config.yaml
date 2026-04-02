@@ -1,27 +1,26 @@
-io:
-  input_folder: "data/input/" # Папка для входных фото
-  output_folder: "data/output" # Папка для результатов и артефактов
-
 models:
   path: "models/"
 
 # Конфигурация модели сегментации.
 seg-model:
-  path: "models/best.pt"
+  path: "models/best_seg.pt"
   trim_top_pct: 0.3
   trim_bottom_pct: 0.15
   final_size: 244
-  debug: False
+  debug: False  # Неактивно, меняется в аргументах
 
 # Конфигурация модели идентификации.
 id-model:
-  path: "models/vit_reid_best_p1_2026-03-22.pth"
+  path: "models/best_model.pth"
   embedding_dim: 512  # Неактивно
   droupout_rate: 0.4  # Неактивно
 
-# Конфигурация базы данных.
+# Конфигурация бд и faiss.
 db:
-  path: "data/dataset_crop/dataset_crop_24_new"
+  db_path: "database/cards.db"
+  faiss_index_path: "data/embeddings/database_embeddings.pkl"
+  cropped_folder: "data/cropped/"
+  "expiry_hours": 0.00001  # Через сколько просрочиваются записи в uploads
 
 view:
-  size_answer: 5  # Размер рейтинга
+  size_answer: 5  # Размер рейтинга (теперь неактивно, меняется в аргументах во входе)

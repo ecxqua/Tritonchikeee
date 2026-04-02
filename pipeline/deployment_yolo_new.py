@@ -1,31 +1,71 @@
+"""
+pipeline/deployment_yolo_new.py — Ядро сегментации брюшка тритона (YOLO)
+Версия: 3.0 (Refactored for API)
+
+АРХИТЕКТУРНЫЕ ИЗМЕНЕНИЯ:
+    1. Debug-файлы → опционально (флаг debug=False по умолчанию)
+    2. Возврат numpy array → нет лишнего I/O (in-memory pipeline) (TODO: требует подключения)
+    3. Возвращаемый тип → Dict вместо bool (больше информации)
+
+Зависимости:
+    - models/best_seg.pt — веса YOLO модели сегментации
+"""
+
 import os
+import logging
 import cv2
 import numpy as np
+from pathlib import Path
+from typing import Optional, Dict, Any
 from ultralytics import YOLO
 from scipy.ndimage import map_coordinates, gaussian_filter1d
 
+logger = logging.getLogger(__name__)
+
+# =============================================================================
+# КЛАСС РАЗВЕРТКИ БРЮШКА
+# =============================================================================
 
 class TritonMaskUnwrapper:
+    """
+    Класс для развертки брюшка тритона по маске сегментации.
+    
+    Args:
+        trim_top_pct: Процент обрезки сверху (по умолчанию 0.15)
+        trim_bottom_pct: Процент обрезки снизу (по умолчанию 0.3)
+        final_size: Финальный размер изображения (по умолчанию 244)
+        seg_model_path: Путь к модели YOLO сегментации
+    """
+    
     def __init__(
         self,
-        trim_top_pct=0.3,
-        trim_bottom_pct=0.15,
-        final_size=244,
-        seg_model_path="bot/models/best.pt"
+        trim_top_pct: float = 0.15,
+        trim_bottom_pct: float = 0.3,
+        final_size: int = 244,
+        seg_model_path: str = "models/best_seg.pt"
     ):
-        """
-        Инициализация модели сегментации для развертки брюшка тритона
-        """
+        # Валидация пути к модели
+        if not Path(seg_model_path).exists():
+            raise FileNotFoundError(f"Модель сегментации не найдена: {seg_model_path}")
+        
         self.seg_model = YOLO(seg_model_path)
-
+        
         # Параметры для настройки
-        self.TRIM_TOP_PCT = trim_top_pct  # 30% сверху
-        self.TRIM_BOTTOM_PCT = trim_bottom_pct  # 15% снизу
-        self.FINAL_SIZE = final_size  # Итоговый размер
-
-    def extract_smooth_centerline(self, mask, step=2, sigma_x=3):
+        self.TRIM_TOP_PCT = trim_top_pct
+        self.TRIM_BOTTOM_PCT = trim_bottom_pct
+        self.FINAL_SIZE = final_size
+    
+    def extract_smooth_centerline(self, mask: np.ndarray, step: int = 2, sigma_x: float = 3) -> np.ndarray:
         """
         Строит медиальную линию по маске.
+        
+        Args:
+            mask: Маска сегментации (H, W)
+            step: Шаг дискретизации по Y
+            sigma_x: Коэффициент сглаживания по X
+        
+        Returns:
+            np.ndarray: Центральная линия (N, 2)
         """
         h, w = mask.shape
         ys = np.arange(0, h, step)
@@ -45,30 +85,52 @@ class TritonMaskUnwrapper:
         centerline[:, 0] = gaussian_filter1d(centerline[:, 0], sigma=sigma_x)
         return centerline
 
-    def get_segmentation_mask(self, image, img_path):
+    def get_segmentation_mask(self, image: np.ndarray, img_path: str) -> Optional[np.ndarray]:
         """
         Получает маску сегментации с помощью YOLO модели.
+        
+        Args:
+            image: Исходное изображение (BGR, H, W, 3)
+            img_path: Путь к изображению (для YOLO)
+        
+        Returns:
+            np.ndarray: Маска (H, W, uint8) или None если не найдена
         """
         h_img, w_img = image.shape[:2]
-        seg_results = self.seg_model(img_path)
-        masks = seg_results[0].masks
-        if masks is None:
+        seg_results = self.seg_model(img_path, verbose=False)
+        
+        if not seg_results or seg_results[0].masks is None:
+            logger.warning(f"Маска не найдена для {img_path}")
             return None
 
-        mask_tensor = masks.data[0].cpu().numpy()
+        mask_tensor = seg_results[0].masks.data[0].cpu().numpy()
         mask_resized = cv2.resize(mask_tensor, (w_img, h_img), interpolation=cv2.INTER_LINEAR)
         mask = (mask_resized > 0.5).astype(np.uint8) * 255
 
-        # Оставляем только крупнейшую связную область.
+        # Оставляем только крупнейшую связную область
         num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(mask, connectivity=8)
         if num_labels > 1:
             largest_label = 1 + np.argmax(stats[1:, cv2.CC_STAT_AREA])
             mask = np.where(labels == largest_label, 255, 0).astype(np.uint8)
+        
         return mask
 
-    def unwrap_belly_trimmed_ends(self, image, mask, centerline_raw, save_path):
+    def unwrap_belly_to_array(
+        self,
+        image: np.ndarray,
+        mask: np.ndarray,
+        centerline_raw: np.ndarray
+    ) -> np.ndarray:
         """
-        Разворачивает изображение брюшка тритона только по маске.
+        Разворачивает изображение брюшка и возвращает numpy array (без сохранения на диск).
+        
+        Args:
+            image: Исходное изображение (BGR, H, W, 3)
+            mask: Маска сегментации (H, W)
+            centerline_raw: Центральная линия (N, 2)
+        
+        Returns:
+            np.ndarray: Развёрнутое изображение брюшка (FINAL_SIZE, FINAL_SIZE, 3)
         """
         trim_top_pct = self.TRIM_TOP_PCT
         trim_bottom_pct = self.TRIM_BOTTOM_PCT
@@ -191,33 +253,61 @@ class TritonMaskUnwrapper:
         # 7. Ресайз до финального размера
         final = cv2.resize(unwrapped, (final_size, final_size), interpolation=cv2.INTER_LINEAR)
 
-        # 8. Сохранение
+        return final  # ← Возвращаем array, не сохраняем
+
+    def unwrap_belly_trimmed_ends(
+        self,
+        image: np.ndarray,
+        mask: np.ndarray,
+        centerline_raw: np.ndarray,
+        save_path: str
+    ) -> np.ndarray:
+        """
+        Разворачивает изображение брюшка и сохраняет на диск.
+        
+        Args:
+            image: Исходное изображение
+            mask: Маска сегментации
+            centerline_raw: Центральная линия
+            save_path: Путь для сохранения
+        
+        Returns:
+            np.ndarray: Развёрнутое изображение
+        """
+        # Используем unwrap_belly_to_array() для вычислений
+        final = self.unwrap_belly_to_array(image, mask, centerline_raw)
+        
+        # Сохраняем на диск
         os.makedirs(os.path.dirname(save_path), exist_ok=True)
         cv2.imwrite(save_path, final, [int(cv2.IMWRITE_JPEG_QUALITY), 95])
+        
+        return final
 
+# =============================================================================
+# DEBUG-ФУНКЦИИ (ОПЦИОНАЛЬНО)
+# =============================================================================
 
-def save_segmentation_debug(image, mask, output_dir):
-    """Сохраняет артефакты сегментации для визуальной проверки YOLO."""
+def save_segmentation_debug(image: np.ndarray, mask: np.ndarray, output_dir: str) -> None:
+    """
+    Сохраняет артефакты сегментации для визуальной проверки YOLO.
+    
+    Args:
+        image: Исходное изображение
+        mask: Маска сегментации
+        output_dir: Директория для сохранения
+    """
     os.makedirs(output_dir, exist_ok=True)
-
+    
     mask_binary = (mask > 127).astype(np.uint8) * 255
     mask_path = os.path.join(output_dir, "yolo_mask.png")
     cv2.imwrite(mask_path, mask_binary)
 
     masked_region = cv2.bitwise_and(image, image, mask=mask_binary)
     masked_region_path = os.path.join(output_dir, "yolo_region.jpg")
-    cv2.imwrite(
-        masked_region_path,
-        masked_region,
-        [int(cv2.IMWRITE_JPEG_QUALITY), 95],
-    )
+    cv2.imwrite(masked_region_path, masked_region, [int(cv2.IMWRITE_JPEG_QUALITY), 95])
 
     overlay = image.copy()
-    contours, _ = cv2.findContours(
-        mask_binary,
-        cv2.RETR_EXTERNAL,
-        cv2.CHAIN_APPROX_SIMPLE,
-    )
+    contours, _ = cv2.findContours(mask_binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     if contours:
         largest_contour = max(contours, key=cv2.contourArea)
         cv2.drawContours(overlay, [largest_contour], -1, (0, 255, 0), 2)
@@ -226,36 +316,67 @@ def save_segmentation_debug(image, mask, output_dir):
 
     overlay_path = os.path.join(output_dir, "yolo_overlay.jpg")
     cv2.imwrite(overlay_path, overlay, [int(cv2.IMWRITE_JPEG_QUALITY), 95])
+    
+    logger.debug(f"Debug-артефакты сохранены в {output_dir}")
 
+# =============================================================================
+# ОСНОВНАЯ ФУНКЦИЯ ОБРАБОТКИ
+# =============================================================================
 
 async def process_single_image(
-    img_path,
-    output_dir,
-    trim_top_pct=0.15,
-    trim_bottom_pct=0.3,
-    final_size=244,
-    seg_model_path="bot/models/best_seg.pt"
-):
+    img_path: str,
+    output_dir: Optional[str] = None,
+    trim_top_pct: float = 0.15,
+    trim_bottom_pct: float = 0.3,
+    final_size: int = 244,
+    seg_model_path: str = "models/best_seg.pt",
+    debug: bool = False,
+    return_array: bool = True,
+) -> Dict[str, Any]:
     """
     Основная функция обработки одного изображения.
-    Сохраняет результат как image_cropped.jpg в указанной директории.
-
+    
+    АРХИТЕКТУРНЫЕ ИЗМЕНЕНИЯ В ВЕРСИИ 3.0:
+        1. Возвращает Dict вместо bool (больше информации)
+        2. Возвращает numpy array (return_array=True) — нет лишнего I/O
+        3. Debug-файлы опционально (debug=False по умолчанию)
+        4. Сохранение на диск только для архива (не для pipeline)
+    
     Args:
-        img_path: путь к изображению
-        output_dir: директория для сохранения результата
-
+        img_path: Путь к изображению
+        output_dir: Директория для сохранения (если None, не сохраняем)
+        trim_top_pct: Процент обрезки сверху
+        trim_bottom_pct: Процент обрезки снизу
+        final_size: Финальный размер изображения
+        seg_model_path: Путь к модели YOLO
+        debug: Сохранять ли debug-артефакты (маска, overlay)
+        return_array: Возвращать ли numpy array (для in-memory pipeline)
+    
     Returns:
-        success: True/False - успех обработки
+        Dict:
+            - success: bool (успех обработки)
+            - crop_array: np.ndarray | None (кроп брюшка в памяти)
+            - crop_path: str | None (путь к сохранённому файлу)
+            - error: str | None (описание ошибки)
     """
+    result: Dict[str, Any] = {
+        'success': False,
+        'crop_array': None,
+        'crop_path': None,
+        'error': None
+    }
+    
     try:
         # Валидация формата файла
         if not img_path.lower().endswith((".jpg", ".jpeg", ".png")):
-            return False
+            result['error'] = "Неподдерживаемый формат файла"
+            return result
 
         # Загрузка изображения
         image = cv2.imread(img_path)
         if image is None:
-            return False
+            result['error'] = "Не удалось загрузить изображение"
+            return result
 
         # Создание unwrapper
         unwrapper = TritonMaskUnwrapper(
@@ -268,40 +389,77 @@ async def process_single_image(
         # Получение маски
         mask = unwrapper.get_segmentation_mask(image, img_path)
         if mask is None:
-            return False
+            result['error'] = "Маска не найдена (YOLO не детектировал тритона)"
+            return result
 
-        save_segmentation_debug(image, mask, output_dir)
+        # Debug-артефакты (только если нужно)
+        if debug:
+            save_segmentation_debug(image, mask, output_dir or "output/debug")
 
         # Извлечение центральной линии
         centerline = unwrapper.extract_smooth_centerline(mask)
 
-        # Создание директории и сохранение результата
-        os.makedirs(output_dir, exist_ok=True)
-        save_path = os.path.join(output_dir, "image_cropped.jpg")
+        # Развертка брюшка → numpy array (в памяти!)
+        unwrapped = unwrapper.unwrap_belly_to_array(image, mask, centerline)
+        
+        if return_array:
+            result['crop_array'] = unwrapped
 
-        # Развертка брюшка
-        unwrapper.unwrap_belly_trimmed_ends(image, mask, centerline, save_path)
-        return True
+        # Сохранение на диск для дальнейшей обработки.
+        if output_dir:
+            os.makedirs(output_dir, exist_ok=True)
+            save_path = os.path.join(output_dir, "image_cropped.jpg")
+            cv2.imwrite(save_path, unwrapped, [int(cv2.IMWRITE_JPEG_QUALITY), 95])
+            result['crop_path'] = save_path
+            logger.debug(f"Кроп сохранён: {save_path}")
+
+        result['success'] = True
+        logger.info(f"Обработка успешна: {Path(img_path).name}")
+        return result
 
     except Exception as e:
-        print(f"Ошибка при обработке {img_path}: {str(e)}")
-        return False
+        result['error'] = str(e)
+        logger.error(f"Ошибка при обработке {img_path}: {str(e)}")
+        return result
 
+# =============================================================================
+# СИНХРОННАЯ ОБЁРТКА
+# =============================================================================
 
-# НЕРАБОЧАЯ СИНХРОННАЯ ФУНКЦИЯ
-# # Синхронная версия для импорта
-# def process_single_image_sync(img_path, output_dir):
-#     """
-#     Синхронная версия функции обработки изображения.
-#     Импортируйте эту функцию в ваш код.
-#     """
-#     import asyncio
-
-#     # Создаем новую event loop для синхронного вызова
-#     try:
-#         loop = asyncio.get_event_loop()
-#     except RuntimeError:
-#         loop = asyncio.new_event_loop()
-#         asyncio.set_event_loop(loop)
-
-#     return loop.run_until_complete(process_single_image(img_path, output_dir))
+def process_single_image_sync(
+    img_path: str,
+    output_dir: Optional[str] = None,
+    trim_top_pct: float = 0.15,
+    trim_bottom_pct: float = 0.3,
+    final_size: int = 244,
+    seg_model_path: str = "models/best_seg.pt",
+    debug: bool = False,
+    return_array: bool = True,
+) -> Dict[str, Any]:
+    """
+    Синхронная версия process_single_image().
+    
+    Args:
+        См. process_single_image()
+    
+    Returns:
+        Dict: Результаты обработки
+    """
+    import asyncio
+    
+    try:
+        loop = asyncio.get_event_loop()
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+    
+    return loop.run_until_complete(process_single_image(
+        img_path=img_path,
+        output_dir=output_dir,
+        trim_top_pct=trim_top_pct,
+        trim_bottom_pct=trim_bottom_pct,
+        final_size=final_size,
+        seg_model_path=seg_model_path,
+        debug=debug,
+        return_array=return_array
+    ))

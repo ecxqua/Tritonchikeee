@@ -1,6 +1,10 @@
 """
-🦎 Миграция датасета тритонов в базу данных
-🔥 ИСПРАВЛЕНО: individual_id включает template_type (NT-K-1-ИК1)
+🦎 Миграция датасета тритонов в базу данных.
+
+Работает с новой схемой:
+    - ✅ projects таблица (id, name, description)
+    - ✅ individuals.project_id (FK → projects.id)
+    - ✅ uploads.project_id (FK → projects.id)
 """
 
 import sqlite3
@@ -8,7 +12,7 @@ from pathlib import Path
 from datetime import datetime
 
 DB_PATH = Path("database/cards.db")
-DATASET_PATH = Path("data/dataset_crop/dataset_crop_24")
+DATASET_PATH = Path("data/dataset_crop/dataset_crop_24_new")
 
 SPECIES_CONFIG = {
     "karelin": {
@@ -26,37 +30,54 @@ SPECIES_CONFIG = {
 PROJECT_NAME = "Миграция_Датасет_2024"
 DEFAULT_TEMPLATE = "ИК-1"
 
-
 def get_connection():
+    """Получить соединение с БД."""
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     return conn
 
+def get_or_create_project(cursor, project_name: str, description: str = None) -> int:
+    """
+    Получить ID проекта или создать новый.
+    
+    ⚠️ Это вспомогательная функция для миграции, НЕ часть CRUD API.
+    """
+    # Проверить существует ли проект
+    cursor.execute('SELECT id FROM projects WHERE name = ?', (project_name,))
+    row = cursor.fetchone()
+    
+    if row:
+        return row['id']
+    
+    # Создать новый проект
+    cursor.execute('''
+        INSERT INTO projects (name, description, created_at)
+        VALUES (?, ?, ?)
+    ''', (project_name, description, datetime.now().isoformat()))
+    
+    return cursor.lastrowid
 
-def individual_exists(cursor, individual_id):
-    """Проверить, существует ли карточка в БД"""
+def individual_exists(cursor, individual_id: str) -> bool:
+    """Проверить, существует ли карточка в БД."""
     cursor.execute(
         "SELECT individual_id FROM individuals WHERE individual_id = ?",
         (individual_id,)
     )
     return cursor.fetchone() is not None
 
-
-def create_individual(cursor, individual_id, species, project_name, template_type=DEFAULT_TEMPLATE):
-    """Создать запись о карточке особи"""
+def create_individual(cursor, individual_id: str, species: str, project_id: int, template_type: str = DEFAULT_TEMPLATE):
+    """Создать запись о карточке особи."""
     cursor.execute('''
-        INSERT OR IGNORE INTO individuals 
-        (individual_id, template_type, species, project_name, created_at)
+        INSERT OR IGNORE INTO individuals
+        (individual_id, template_type, species, project_id, created_at)
         VALUES (?, ?, ?, ?, ?)
-    ''', (individual_id, template_type, species, project_name, datetime.now()))
+    ''', (individual_id, template_type, species, project_id, datetime.now()))
 
-
-def create_photo(cursor, individual_id, photo_path, photo_number, is_main=False, is_legacy=True):
-    """Создать запись о фотографии"""
+def create_photo(cursor, individual_id: str, photo_path: Path, photo_number: str, is_main: bool = False, is_legacy: bool = True) -> int:
+    """Создать запись о фотографии."""
     cursor.execute('''
-        INSERT INTO photos 
-        (individual_id, photo_type, photo_number, photo_path, 
-         is_main, is_legacy, embedding_index, is_processed)
+        INSERT INTO photos
+        (individual_id, photo_type, photo_number, photo_path, is_main, is_legacy, embedding_index, is_processed)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     ''', (
         individual_id,
@@ -68,21 +89,27 @@ def create_photo(cursor, individual_id, photo_path, photo_number, is_main=False,
         -1,
         0
     ))
-    
     return cursor.lastrowid
 
-
-def migrate_dataset():
-    """Основная функция миграции"""
+def migrate_dataset() -> dict:
+    """Основная функция миграции."""
     print("🦎 Начинаем миграцию датасета тритонов...")
     print("=" * 60)
     
     if not DATASET_PATH.exists():
         print(f"❌ Папка датасета не найдена: {DATASET_PATH}")
-        return
+        return {}
     
     conn = get_connection()
     cursor = conn.cursor()
+    
+    # 🔥 Создать или получить проект (получаем project_id)
+    project_id = get_or_create_project(
+        cursor,
+        PROJECT_NAME,
+        "Автоматически импортированные данные из dataset_crop_24_new"
+    )
+    print(f"✅ Проект: '{PROJECT_NAME}' (ID={project_id})")
     
     total_individuals = 0
     total_photos = 0
@@ -100,27 +127,33 @@ def migrate_dataset():
             continue
         
         individual_folders = sorted([
-            f for f in species_folder.iterdir() 
+            f for f in species_folder.iterdir()
             if f.is_dir() and f.name.isdigit()
         ])
         
         print(f"   Найдено особей: {len(individual_folders)}")
         
         for individual_folder in individual_folders:
-            # 🔥 ИСПРАВЛЕНО: Добавляем шаблон к ID (как в save_new.py)
+            # Формирование ID: NT-K-1-ИК1
             animal_num = individual_folder.name
             individual_id = f"NT-{species_prefix}-{animal_num}-{DEFAULT_TEMPLATE.replace('-', '')}"
-            # Пример: NT-K-1-ИК1, NT-R-47-ИК1
             
             if individual_exists(cursor, individual_id):
                 print(f"   ⏭️ Пропущено: {individual_id} (уже в БД)")
                 skipped_individuals += 1
                 continue
             
-            create_individual(cursor, individual_id, species_name, PROJECT_NAME)
+            # 🔥 Используем project_id (FK)
+            create_individual(
+                cursor=cursor,
+                individual_id=individual_id,
+                species=species_name,
+                project_id=project_id  # ← FOREIGN KEY
+            )
             total_individuals += 1
             print(f"   ✅ Добавлено: {individual_id}")
             
+            # Поиск фотографий
             photos = sorted(individual_folder.glob("*.jpg"))
             if not photos:
                 photos = sorted(individual_folder.glob("*.jpeg"))
@@ -160,28 +193,29 @@ def migrate_dataset():
         "individuals_skipped": skipped_individuals
     }
 
-
 def verify_migration():
-    """Проверить результаты миграции"""
+    """Проверить результаты миграции."""
     print("\n🔍 Проверка миграции...")
-    
     conn = get_connection()
     cursor = conn.cursor()
     
+    # Карточки по видам (через JOIN с projects)
     cursor.execute('''
-        SELECT species, COUNT(*) as count 
-        FROM individuals 
-        WHERE project_name = ?
-        GROUP BY species
+        SELECT i.species, COUNT(*) as count, p.name as project_name
+        FROM individuals i
+        JOIN projects p ON i.project_id = p.id
+        WHERE p.name = ?
+        GROUP BY i.species
     ''', (PROJECT_NAME,))
     
     print("\n📋 Карточки по видам:")
     for row in cursor.fetchall():
-        print(f"   {row['species']}: {row['count']}")
+        print(f"   {row['species']} ({row['project_name']}): {row['count']}")
     
+    # Фотографии
     cursor.execute('''
-        SELECT photo_type, is_legacy, COUNT(*) as count 
-        FROM photos 
+        SELECT photo_type, is_legacy, COUNT(*) as count
+        FROM photos
         WHERE individual_id LIKE 'NT-%'
         GROUP BY photo_type, is_legacy
     ''')
@@ -190,31 +224,39 @@ def verify_migration():
     for row in cursor.fetchall():
         print(f"   {row['photo_type']} (legacy={row['is_legacy']}): {row['count']}")
     
+    # Фото без эмбеддинга
     cursor.execute('''
-        SELECT COUNT(*) as count 
-        FROM photos 
+        SELECT COUNT(*) as count
+        FROM photos
         WHERE embedding_index = -1 AND is_legacy = 1
     ''')
-    
     result = cursor.fetchone()
     print(f"\n⚠️ Фото без эмбеддинга: {result['count']}")
     
-    # 🔥 Проверка формата ID
+    # Примеры ID
     cursor.execute('''
-        SELECT individual_id FROM individuals 
-        WHERE project_name = ?
+        SELECT i.individual_id, p.name as project_name
+        FROM individuals i
+        JOIN projects p ON i.project_id = p.id
+        WHERE p.name = ?
         LIMIT 5
     ''', (PROJECT_NAME,))
     
     print("\n📋 Примеры ID карточек:")
     for row in cursor.fetchall():
-        print(f"   {row['individual_id']}")
+        print(f"   {row['individual_id']} (проект: {row['project_name']})")
     
     conn.close()
 
-
 if __name__ == "__main__":
-    migrate_dataset()
+    from database.card_database import init_database
+    
+    # 1. Инициализация БД (создаст таблицу projects)
+    init_database()
+    
+    # 2. Миграция
+    stats = migrate_dataset()
     verify_migration()
+    
     print("\n✅ Миграция завершена!")
     print("👉 Следующий шаг: запустить build_faiss_index.py")
