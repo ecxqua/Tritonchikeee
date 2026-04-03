@@ -376,7 +376,11 @@ class CardService:
             raise ValueError("Для добавления встречи используйте шаблоны КВ-1 или КВ-2")
         
         _validate_template_fields(template_type, card_data)
-        
+
+        # Правильно генерируем ID новой особи.
+        # NT-K-13-ИК1 -> NT-K-13-КВ1
+        individual_id = individual_id[:-3] + template_type.replace("-", "")
+
         conn = get_db_connection(self.db_path)
         cursor = conn.cursor()
         photo_number = _get_next_photo_number(cursor, individual_id)
