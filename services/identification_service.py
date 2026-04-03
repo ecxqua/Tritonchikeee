@@ -207,6 +207,7 @@ class IdentificationService:
             
             prototypes = self._load_prototypes(project_id)
             
+            candidates = []
             if prototypes['individual_ids']:
                 logger.info(f"Найдено {len(prototypes['individual_ids'])} особей для поиска")
                 candidates = self._search_similar(embedding, prototypes, top_k)
