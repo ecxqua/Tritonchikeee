@@ -14,12 +14,12 @@ router = APIRouter()
 @router.post("/analyse")
 async def analyse(
     file: UploadFile = File(...),  # multipart/form-data request
-    id_service = Depends(get_id_service),
-    temp = Depends(get_temp)
+    id_service=Depends(get_id_service),
+    temp=Depends(get_temp)
 ):
     if file.content_type not in ["image/png", "image/jpeg"]:
         return {"error": "Invalid file type"}
-    
+
     contents = await file.read()
     original_name = Path(file.filename)
 

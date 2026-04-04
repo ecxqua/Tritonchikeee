@@ -15,11 +15,11 @@ async def confirm(
     upload_id: int = Form(...),
     decision: str = Form(...),
     existing_id: str | None = Form(...),
-    id_service = Depends(get_id_service),
-    temp = Depends(get_temp)
+    id_service=Depends(get_id_service),
+    temp=Depends(get_temp)
 ):
     params = dict(await request.form())
-    
+
     try:
         return await run_in_threadpool(
             service.complete_confirmation,

@@ -18,10 +18,10 @@ def complete_confirmation(
     up = id_service.upload_service.get_upload(upload_id)
     if not up or up["status"] not in ["pending"]:
         raise APIError(f"Invalid upload code {upload_id}", status=400)
-    
+
     if decision not in ["NEW", "MATCH", "CANCEL"]:
         raise APIError("Invalid decision choice", status=400)
-    
+
     return make_json_safe(id_service.confirm_decision(
         upload_id=upload_id,
         decision=decision,
