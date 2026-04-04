@@ -368,12 +368,15 @@ async def process_single_image(
     
     try:
         # Валидация формата файла
-        if not img_path.lower().endswith((".jpg", ".jpeg", ".png")):
+        if not Path(img_path).suffix.lower() in [".jpg", ".jpeg", ".png"]:
             result['error'] = "Неподдерживаемый формат файла"
             return result
 
         # Загрузка изображения
-        image = cv2.imread(img_path)
+        # эти махинации нужны, поскольку иногда!! process_single_image
+        # из некоторого неведомого неотслеженного источника получает
+        # img_path: Path вместо img_path: str и все ломается.
+        image = cv2.imread(str(Path(img_path).resolve()))
         if image is None:
             result['error'] = "Не удалось загрузить изображение"
             return result
@@ -420,6 +423,8 @@ async def process_single_image(
     except Exception as e:
         result['error'] = str(e)
         logger.error(f"Ошибка при обработке {img_path}: {str(e)}")
+        import traceback
+        traceback.print_exc()
         return result
 
 # =============================================================================

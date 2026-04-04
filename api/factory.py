@@ -11,7 +11,6 @@ async def lifespan(api: FastAPI):
     service = create_identification_service()
 
     temp = TempStorage()
-    temp.cleanup()
 
     api.state.id_service = service
     api.state.temp = temp

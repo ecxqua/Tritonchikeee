@@ -11,9 +11,9 @@ from pathlib import Path
 router = APIRouter()
 
 
-@router.post("/analyse/")
+@router.post("/analyse")
 async def analyse(
-    file: UploadFile = File(...),  # multipart/form-data request,
+    file: UploadFile = File(...),  # multipart/form-data request
     id_service = Depends(get_id_service),
     temp = Depends(get_temp)
 ):
