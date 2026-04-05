@@ -1,5 +1,4 @@
 from services.identification_service import IdentificationService
-from api.services.temp import TempStorage
 from api.error import APIError
 
 from utils.json_utils import make_json_safe
@@ -12,8 +11,7 @@ def complete_confirmation(
     decision: str,
     existing_id: str | None,
     params: Dict[str, str],
-    id_service: IdentificationService,
-    temp: TempStorage
+    id_service: IdentificationService
 ) -> Dict[str, Any]:
     up = id_service.upload_service.get_upload(upload_id)
     if not up or up["status"] not in ["pending"]:

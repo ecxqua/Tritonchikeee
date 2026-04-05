@@ -17,7 +17,7 @@ async def lifespan(api: FastAPI):
 
     yield
 
-    # cleanup on shutdown also
+    # cleanup on shutdown
     temp.cleanup()
 
 
