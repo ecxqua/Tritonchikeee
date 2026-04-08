@@ -1,0 +1,27 @@
+{
+  "name": "tritoni",
+  "version": "1.0.0",
+  "description": "App forIdentification",
+  "keywords": [
+    "triton"
+  ],
+  "homepage": "https://github.com/Slavik-Mmmbech/Tritoni#readme",
+  "bugs": {
+    "url": "https://github.com/Slavik-Mmmbech/Tritoni/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Slavik-Mmmbech/Tritoni.git"
+  },
+  "license": "ISC",
+  "author": "Slava",
+  "type": "commonjs",
+  "main": "index.js",
+  "directories": {
+    "test": "tests"
+  },
+  "scripts": {
+    "start": "electron .",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  }
+}

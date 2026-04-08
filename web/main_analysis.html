@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tritoni | Опознание тритона</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="screen">
+        <a href="index.html" class="back-link">← На главный экран</a>
+
+        <header class="page-header">
+            <h1>Опознание тритона</h1>
+            <p class="subtitle">Шаблон процесса: выбор области поиска → загрузка фото → обработка → сравнение с БД.</p>
+        </header>
+
+        <section class="panel">
+            <h2>1) Хотите искать через</h2>
+            <div class="radio-row">
+                <label><input type="radio" name="searchMode" value="all" checked> Все тритоны</label>
+                <label><input type="radio" name="searchMode" value="species"> По виду</label>
+                <label><input type="radio" name="searchMode" value="territory"> По территории</label>
+            </div>
+
+            <div id="speciesWrap" class="field-row hidden">
+                <label for="speciesLimit">Ограничить выбор по виду</label>
+                <input id="speciesLimit" placeholder="Например: Triturus cristatus">
+            </div>
+            <div id="territoryWrap" class="field-row hidden">
+                <label for="territoryLimit">Ограничить выбор по территории</label>
+                <input id="territoryLimit" placeholder="Например: Калужская область">
+            </div>
+        </section>
+
+        <section class="panel">
+            <h2>2) Загрузка фото и переименование</h2>
+            <div class="field-row">
+                <label for="photoInput">Фото тритона</label>
+                <input id="photoInput" type="file" accept="image/*">
+            </div>
+            <div class="field-row">
+                <label><input type="checkbox" id="renameNeeded"> Нужно переименовать файл перед обработкой</label>
+                <input id="newFilename" class="hidden" placeholder="Новое имя файла.jpg">
+            </div>
+        </section>
+
+        <section class="panel">
+            <h2>3) Обработка Yolo + сравнение с БД</h2>
+            <div class="action-row">
+                <button class="btn primary" id="runIdentifyBtn">Запустить обработку</button>
+                <label><input type="checkbox" id="simulateNotFound"> Смоделировать: совпадений нет</label>
+            </div>
+            <ol id="pipelineLog" class="pipeline-log"></ol>
+        </section>
+
+        <section class="panel">
+            <h2>4) Результат</h2>
+            <div id="foundResult" class="result-card hidden">
+                <h3>Найдено совпадение</h3>
+                <p><strong>ID:</strong> TR-1142</p>
+                <p><strong>Вид:</strong> Triturus dobrogicus</p>
+                <p><strong>Совпадение:</strong> 93%</p>
+                <p><strong>Топ-20:</strong> список кандидатов отображается здесь после интеграции API.</p>
+            </div>
+            <div id="notFoundResult" class="result-card warning hidden">
+                <h3>Новый тритон</h3>
+                <p>Совпадений в базе не найдено.</p>
+                <a href="add.species.html" class="btn secondary btn-link">Создать новую карту</a>
+            </div>
+        </section>
+    </div>
+
+    <img class="pixel-corner" src="assets/triton-pixel.png" alt="Пиксель-арт тритона">
+    <div id="toast" class="toast"></div>
+    <script src="renderer.js"></script>
+</body>
+</html>

@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tritoni | Создание новой карты</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="screen">
+        <a href="index.html" class="back-link">← На главный экран</a>
+
+        <header class="page-header">
+            <h1>Создание новой карты</h1>
+            <p class="subtitle">
+                Выберите шаблон описания карточки (ИК-1, ИК-2, КВ-1, КВ-2). Поля можно заполнять частично и
+                править повторно; черновик сохраняется локально в браузере до подключения API и БД.
+            </p>
+        </header>
+
+        <form id="createCardForm">
+            <section class="panel">
+                <div class="field-row full">
+                    <label for="cardTemplateSelect">Формат карточки</label>
+                    <select id="cardTemplateSelect" name="template">
+                        <option value="IK1">ИК-1 — индивидуальная карта (набор 1)</option>
+                        <option value="IK2">ИК-2 — индивидуальная карта (набор 2)</option>
+                        <option value="KV1">КВ-1 — карта встречи (набор 1)</option>
+                        <option value="KV2">КВ-2 — карта встречи (набор 2)</option>
+                    </select>
+                </div>
+                <p class="hint-text">
+                    Пустые поля допускаются: данные можно дозаполнить позже. Для ИК-2 ID родителей можно связать с
+                    базой — после ввода ID доступна ссылка на карту в разделе «Проекты тритонов».
+                </p>
+            </section>
+
+            <section class="panel">
+                <h2>Фото к карточке</h2>
+                <div class="field-row full">
+                    <label for="cardPhotoFile">Файл фото (опционально)</label>
+                    <input id="cardPhotoFile" type="file" accept="image/*">
+                </div>
+            </section>
+
+            <section class="panel">
+                <h2 id="templateSectionTitle">Поля шаблона</h2>
+                <div id="templateFieldsRoot" class="form-grid template-fields-root"></div>
+            </section>
+
+            <section class="panel action-panel">
+                <div class="action-row">
+                    <button class="btn primary" type="submit">Сохранить и показать предпросмотр</button>
+                    <button class="btn secondary" id="saveDraftBtn" type="button">Сохранить черновик</button>
+                    <button class="btn secondary" id="loadDraftBtn" type="button">Загрузить черновик</button>
+                    <button class="btn secondary" id="resetCardFormBtn" type="button">Очистить форму</button>
+                </div>
+            </section>
+        </form>
+
+        <section class="panel hidden" id="cardPreviewPanel">
+            <h2>Предпросмотр карточки</h2>
+            <div id="cardPreview" class="result-card preview-block"></div>
+        </section>
+    </div>
+
+    <img class="pixel-corner" src="assets/triton-pixel.png" alt="Пиксель-арт тритона">
+    <div id="toast" class="toast"></div>
+    <script src="renderer.js"></script>
+</body>
+</html>

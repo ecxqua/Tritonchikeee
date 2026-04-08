@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tritoni | Проекты тритонов</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="screen">
+        <a href="index.html" class="back-link">← На главный экран</a>
+
+        <header class="page-header">
+            <h1>Проекты тритонов</h1>
+            <p class="subtitle">Шаблон сценария: все проекты, фильтры, поиск по ID, открытие карточки и действия.</p>
+        </header>
+
+        <section class="panel">
+            <h2>Поиск и фильтрация</h2>
+            <div class="filter-grid">
+                <div class="field-row">
+                    <label for="projectIdSearch">Поиск по ID</label>
+                    <input id="projectIdSearch" placeholder="Например: TR-1002">
+                </div>
+                <div class="field-row">
+                    <label for="speciesFilter">Фильтр по виду</label>
+                    <input id="speciesFilter" placeholder="Например: Triturus alpestris">
+                </div>
+                <div class="field-row">
+                    <label for="territoryFilter">Фильтр по территории</label>
+                    <input id="territoryFilter" placeholder="Например: Татарстан">
+                </div>
+            </div>
+            <div class="action-row">
+                <button id="runProjectSearchBtn" class="btn primary">Поиск + результат</button>
+                <button id="clearProjectSearchBtn" class="btn secondary">Сброс</button>
+            </div>
+        </section>
+
+        <section class="panel">
+            <h2>Результаты</h2>
+            <div id="projectsList" class="projects-list"></div>
+        </section>
+
+        <section class="panel hidden" id="projectCardPanel">
+            <h2>Карточка тритона</h2>
+            <div class="field-row">
+                <label for="cardId">ID</label>
+                <input id="cardId" disabled>
+            </div>
+            <div class="field-row">
+                <label for="cardSpecies">Вид</label>
+                <input id="cardSpecies">
+            </div>
+            <div class="field-row">
+                <label for="cardTerritory">Территория</label>
+                <input id="cardTerritory">
+            </div>
+            <div class="field-row">
+                <label for="cardNotes">Комментарий</label>
+                <textarea id="cardNotes" rows="3"></textarea>
+            </div>
+            <div class="action-row">
+                <button id="saveCardBtn" class="btn primary">Изменить данные + сохранить</button>
+                <button id="showHistoryBtn" class="btn secondary">Посмотреть историю</button>
+                <button id="deleteCardBtn" class="btn danger">Удалить карту</button>
+            </div>
+            <div id="historyBox" class="history-box hidden"></div>
+        </section>
+    </div>
+
+    <img class="pixel-corner" src="assets/triton-pixel.png" alt="Пиксель-арт тритона">
+    <div id="toast" class="toast"></div>
+    <script src="renderer.js"></script>
+</body>
+</html>

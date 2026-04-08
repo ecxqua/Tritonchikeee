@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tritoni | Главное меню</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="screen menu-screen">
+        <header class="page-header">
+            <h1>Что нужно сделать?</h1>
+            <p class="subtitle">Выберите один из рабочих сценариев.</p>
+        </header>
+
+        <section class="card-grid">
+            <button class="menu-card" onclick="navigateTo('main_analysis.html')">
+                <span class="menu-icon">🔎</span>
+                <span class="menu-title">Опознание тритона</span>
+                <span class="menu-desc">Поиск совпадений в базе и вывод топ-результатов.</span>
+            </button>
+
+            <button class="menu-card" onclick="navigateTo('database.html')">
+                <span class="menu-icon">🗂️</span>
+                <span class="menu-title">Проекты тритонов</span>
+                <span class="menu-desc">Поиск карт, фильтрация, редактирование и история.</span>
+            </button>
+
+            <button class="menu-card" onclick="navigateTo('add.species.html')">
+                <span class="menu-icon">🆕</span>
+                <span class="menu-title">Создание новой карты</span>
+                <span class="menu-desc">Шаблон формы создания карточки нового тритона.</span>
+            </button>
+        </section>
+    </div>
+
+    <img class="pixel-corner" src="assets/triton-pixel.png" alt="Пиксель-арт тритона">
+    <script src="renderer.js"></script>
+</body>
+</html>
