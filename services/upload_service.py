@@ -14,6 +14,7 @@ services/upload_service.py — CRUD для временных загрузок (
 import logging
 import json
 import sqlite3
+from pathlib import Path
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any, List
 
@@ -108,6 +109,15 @@ class UploadService:
         now = datetime.now()
         expires_at = now + timedelta(hours=expiry_hours)
         embedding_json = serialize_embedding(embedding)
+
+        # Смена под upload_id
+        upload_id = self.get_stats()["total"] + 1
+        file_suffix = Path(file_path).suffix
+        file_parent = str(Path(file_path).parent)
+        logger.info("Родительская папка сохранённого кропа: " + file_parent)
+        file_path = str(Path(file_path).rename(
+            f"{file_parent}\{upload_id}{file_suffix}"
+        ))
         
         try:
             cursor.execute('''
