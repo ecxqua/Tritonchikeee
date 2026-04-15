@@ -17,6 +17,7 @@ from datetime import datetime
 import sqlite3
 import json
 import numpy as np
+import uuid
 from typing import Optional, Dict, List, Any
 
 from database.card_database import DB_PATH
@@ -109,6 +110,23 @@ def _get_next_photo_number(cursor: sqlite3.Cursor, individual_id: str) -> str:
     count = cursor.fetchone()[0]
     return f"{count + 1:02d}"
 
+def _save_photo(individual_id: str, photo_path_cropped: str):
+    """
+        Сохраняет фотографию с уникальным названием,
+        которая прикрепляется к записи в photos.
+
+        Формат: 'individual_id' + 'uuid для фото'
+    """
+    # Генерируем название фото.
+    photo_name = individual_id + "_" + str(uuid.uuid4())
+    # Меняем название.
+    file_suffix = Path(photo_path_cropped).suffix
+    file_parent = str(Path(photo_path_cropped).parent)
+    logger.info("Родительская папка сохранённого кропа: " + file_parent)
+    photo_path_cropped = str(Path(photo_path_cropped).rename(
+        f"{file_parent}\{photo_name}{file_suffix}"
+    ))
+
 # =============================================================================
 # CARD SERVICE — Основная бизнес-логика
 # =============================================================================
@@ -169,12 +187,8 @@ class CardService:
         
         if individual_id is None:
             individual_id = generate_card_id(cursor, species, template_type)
-        file_suffix = Path(photo_path_cropped).suffix
-        file_parent = str(Path(photo_path_cropped).parent)
-        logger.info("Родительская папка сохранённого кропа: " + file_parent)
-        photo_path_cropped = str(Path(photo_path_cropped).rename(
-            f"{file_parent}\{individual_id}{file_suffix}"
-        ))
+        # Сохраняем фотографию.
+        _save_photo(individual_id, photo_path_cropped)
         logger.info("Сохранённый кроп: " + photo_path_cropped)
         
         if photo_number is None:
@@ -252,100 +266,6 @@ class CardService:
         finally:
             conn.close()
     
-    def finalize_upload(
-        self,
-        upload_id: int,
-        template_type: str,
-        species: str = "Карелина",
-        **card_data
-    ) -> str:
-        """Завершает временную загрузку (из uploads) → создаёт постоянную карточку."""
-        conn = get_db_connection(self.db_path)
-        cursor = conn.cursor()
-        
-        # 1. Читаем временную загрузку
-        cursor.execute('''
-            SELECT file_path, embedding, project_id, status
-            FROM uploads
-            WHERE id = ?
-        ''', (upload_id,))
-        
-        upload = cursor.fetchone()
-        if not upload:
-            raise ValueError(f"Загрузка {upload_id} не найдена")
-        
-        if upload['status'] != 'pending':
-            raise ValueError(f"Загрузка {upload_id} уже обработана (статус: {upload['status']})")
-        
-        # 2. Десериализуем embedding
-        embedding = json.loads(upload['embedding'])
-        embedding = np.array(embedding, dtype='float32')
-        
-        photo_path_cropped = upload['file_path']
-        project_id = upload['project_id']
-        
-        # 3. Генерируем ID
-        individual_id = generate_card_id(cursor, species, template_type)
-        photo_number = _get_next_photo_number(cursor, individual_id)
-        
-        try:
-            # === Создаём карточку ===
-            cursor.execute('''
-                INSERT INTO individuals (
-                    individual_id, template_type, species, project_id,
-                    created_at, date
-                ) VALUES (?, ?, ?, ?, ?, ?)
-            ''', (
-                individual_id, template_type, species, project_id,
-                datetime.now().isoformat(),
-                card_data.get('date', datetime.now().strftime("%d.%m.%Y"))
-            ))
-            
-            cursor.execute('''
-                INSERT INTO photos (
-                    individual_id, photo_type, photo_number, photo_path,
-                    date_taken, is_main, is_processed, embedding_index, is_legacy
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (
-                individual_id, 'cropped', photo_number, photo_path_cropped,
-                card_data.get('date', datetime.now().strftime("%d.%m.%Y")),
-                1, 1, -1, 0
-            ))
-            
-            # === FAISS: Добавляем embedding ===
-            if self.embedding_service:
-                embedding_index = self.embedding_service.add(embedding, {
-                    'individual_id': individual_id,
-                    'photo_path': photo_path_cropped,
-                    'template_type': template_type,
-                    'species': species
-                })
-                self._update_photo_embedding_index(cursor, photo_path_cropped, embedding_index)
-            
-            # === Обновляем статус загрузки ===
-            cursor.execute('''
-                UPDATE uploads
-                SET status = 'completed', card_id = ?
-                WHERE id = ?
-            ''', (individual_id, upload_id))
-            
-            conn.commit()
-            
-            if self.embedding_service:
-                self.embedding_service.commit()
-            
-            logger.info(f"Загрузка {upload_id} завершена: {individual_id}")
-            return individual_id
-            
-        except Exception as e:
-            conn.rollback()
-            if self.embedding_service:
-                self.embedding_service.rollback()
-            logger.error(f"Ошибка завершения загрузки: {e}")
-            raise e
-        finally:
-            conn.close()
-    
     def _update_photo_embedding_index(
         self, 
         cursor: sqlite3.Cursor, 
@@ -380,6 +300,8 @@ class CardService:
         # Правильно генерируем ID новой особи.
         # NT-K-13-ИК1 -> NT-K-13-КВ1
         individual_id = individual_id[:-3] + template_type.replace("-", "")
+        # Сохраняем фотографию
+        _save_photo(individual_id, photo_path_cropped)
 
         conn = get_db_connection(self.db_path)
         cursor = conn.cursor()
@@ -434,7 +356,7 @@ class CardService:
             conn.close()
     
     def update_individual(self, individual_id: str, **kwargs) -> bool:
-        """Обновляет данные существующей особи."""
+        """Обновляет данные существующей карточки."""
         if not kwargs:
             logger.warning("Нет полей для обновления")
             return False
@@ -458,7 +380,7 @@ class CardService:
     # -------------------------------------------------------------------------
     
     def delete_individual(self, individual_id: str, delete_photos: bool = True, confirm: bool = False) -> bool:
-        """Полностью удаляет особь и все её фото (hard delete)."""
+        """Полностью удаляет карточку и все её фото (hard delete)."""
         if not confirm:
             raise ValueError(
                 f"ТРЕБУЕТСЯ ПОДТВЕРЖДЕНИЕ!\n"
@@ -507,7 +429,7 @@ class CardService:
     # -------------------------------------------------------------------------
     
     def get_individual_photos(self, individual_id: str) -> List[Dict[str, Any]]:
-        """Получает все фотографии особи из базы данных."""
+        """Получает все фотографии карточки из базы данных."""
         conn = get_db_connection(self.db_path)
         cursor = conn.cursor()
         
@@ -525,7 +447,7 @@ class CardService:
         return photos
     
     def get_individual(self, individual_id: str) -> Optional[Dict[str, Any]]:
-        """Получает данные особи по ID (с информацией о проекте)."""
+        """Получает данные карточки по ID (с информацией о проекте)."""
         conn = get_db_connection(self.db_path)
         cursor = conn.cursor()
         
@@ -543,7 +465,7 @@ class CardService:
         return dict(row) if row else None
     
     def get_individuals_by_project(self, project_id: int) -> List[Dict[str, Any]]:
-        """Получает список особей по проекту."""
+        """Получает список карточек по проекту."""
         conn = get_db_connection(self.db_path)
         cursor = conn.cursor()
         

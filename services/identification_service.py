@@ -419,6 +419,7 @@ class IdentificationService:
         
         # Создать карточку через card_service (БЕЗ FAISS)
         # 🔥 Передаём project_id, card_service сам получит project_name если нужно
+        # Внутри card_service СОХРАНЯЕТС ФОТОГРАФИЯ НА ДИСКЕ
         individual_id = self.card_service.save_new_individual(
             photo_path_cropped=crop_path,
             project_id=project_id,  # 🔥 FK
@@ -461,6 +462,7 @@ class IdentificationService:
         crop_path = upload['file_path']
         
         # Добавить встречу через card_service (БЕЗ FAISS)
+        # Внутри card_service СОХРАНЯЕТС ФОТОГРАФИЯ НА ДИСКЕ
         self.card_service.add_encounter(
             individual_id=existing_card_id,
             template_type=card_data.get('template_type', 'КВ-1'),
@@ -505,15 +507,24 @@ class IdentificationService:
     def _load_prototypes(self, project_id: Optional[int] = None) -> Dict[str, Any]:
         """
         Загрузить прототипы особей (средние эмбеддинги) из БД + FAISS.
+        Важно: метод обрабатывает усреднённые эмбеддинги по особи,
+        не по карточкам.
+        
+        Это значит, что NT-K-1-КВ1 и NT-K-1-ИК1 образуют один усреднённый эмбеддинг.
+        Усредняем ПО ОСОБИ.
+
+        В этом разница между prototype_id и individual_id.
+        Первое - id особи, второе - id карточки.
+        У одной особи может быть множество карточек.
         
         Args:
             project_id: Фильтр по проекту (если None, все проекты)
         
         Returns:
             Dict:
-                - individual_ids: List[str]
+                - prototype_ids: List[str]
                 - embeddings: np.ndarray (n_individuals, 512)
-                - metadata: Dict[individual_id, Dict]
+                - metadata: Dict[prototype, Dict]
         """
         conn = sqlite3.connect(DB_PATH)
         conn.row_factory = sqlite3.Row
@@ -577,7 +588,7 @@ class IdentificationService:
         conn.close()
         
         # Вычисление прототипов (средний эмбеддинг на особь)
-        individual_ids = []
+        prototype_ids = []
         prototype_embeddings = []
         
         for ind_id, photos in groups.items():
@@ -597,15 +608,15 @@ class IdentificationService:
                 if norm > 1e-12:
                     prototype = prototype / norm
                 
-                individual_ids.append(ind_id)
+                prototype__ids.append(ind_id)
                 prototype_embeddings.append(prototype)
         
         # Диагностика
         embeddings_array = np.array(prototype_embeddings) if prototype_embeddings else np.array([])
-        logger.info(f"Загружено прототипов: {len(individual_ids)}, форма: {embeddings_array.shape}")
+        logger.info(f"Загружено прототипов: {len(prototype__ids)}, форма: {embeddings_array.shape}")
         
         return {
-            'individual_ids': individual_ids,
+            'prototype_ids': prototype_ids,
             'embeddings': embeddings_array,
             'metadata': metadata
         }
