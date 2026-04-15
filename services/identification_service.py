@@ -436,7 +436,7 @@ class IdentificationService:
         embedding = np.array(upload['embedding'], dtype='float32')
         crop_path = upload['file_path']
         if not 'species' in card_data:
-            raise Exception("В card_data указан тип особи species для добавления повторной встречи: 'Карелина', etc.")
+            raise Exception("В card_data не указан тип особи species для добавления повторной встречи: 'Карелина', etc.")
         species = card_data['species']
         
         # Добавить встречу через card_service (БЕЗ FAISS)
