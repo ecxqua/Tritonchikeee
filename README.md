@@ -14,7 +14,7 @@
 ```identification_service.py``` - это вход в приложение. В ```test_identification_service.py``` описан пример работы со входом, который вы можете использовать.
 
 1. Подтяните зависимости из `requirements.txt`.
-2. Скачайте веса обученных моделей: `python -m bot.download_models`
+2. Скачайте веса обученных моделей: `python -m utils.download_models`
 3. Заполните `config/config.yaml`.
 
 Если хотите запустить быстрый тест анализа, то можно использовать `tests/`.
