@@ -386,7 +386,7 @@ class IdentificationService:
         crop_path = upload['file_path']
         project_id = upload['project_id']  # 🔥 Уже есть project_id
         if not 'species' in card_data:
-            raise Exception("В card_data не указан вид особи")
+            raise Exception("В card_data не указан вид особи (Укажите, например 'Карелина')")
         species = card_data['species']
         
         # Создать карточку через card_service (БЕЗ FAISS)
