@@ -311,7 +311,6 @@ class CardService:
         self,
         prototype_id: str,
         template_type: str,
-        photo_path_full: Optional[str] = None,  # Обычно не исп.
         photo_path_cropped: Optional[str] = None,
         **card_data
     ) -> str:
@@ -338,8 +337,6 @@ class CardService:
         # Сохраняем фотографию
         if photo_path_cropped:
             photo_path_cropped = rename_photo(card_id, photo_path_cropped, suffix="cropped")
-        if photo_path_full:
-            photo_path_full = rename_photo(card_id, photo_path_full, suffix="full")
 
         conn = get_db_connection(self.db_path)
         cursor = conn.cursor()
@@ -368,12 +365,6 @@ class CardService:
                 card_data.get('sex'), card_data.get('notes'),
                 datetime.now().isoformat()
             ))
-            
-            if photo_path_full:
-                cursor.execute('''
-                    INSERT INTO photos (card_id, photo_type, photo_number, photo_path, date_taken, is_main, is_processed, embedding_index, is_legacy)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ''', (card_id, 'full', photo_number, photo_path_full, card_data.get('date'), 0, 0, None, 0))
             
             if photo_path_cropped:
                 cursor.execute('''
