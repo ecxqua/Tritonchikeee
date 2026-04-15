@@ -116,7 +116,7 @@ prototypes: List[Dict[str, Any]] = card_service.get_all_prototypes()
 ### Получение всех карточек проекта
 
 ```python
-all_cards: List[Dict[str, Any]] = get_cards_by_project(
+all_cards: List[Dict[str, Any]] = card_service.get_cards_by_project(
     project_id: int
 )
 ```
@@ -166,7 +166,7 @@ result = project_service.update_project(
 
 ### Удаление проекта
 ```python
-result = service.delete_project(
+result = project_service.delete_project(
     project_id=1,
     confirm=True
 )
