@@ -18,6 +18,7 @@ async def confirm(
     id_service=Depends(get_id_service)
 ):
     params = dict(await request.form())
+    str_params = {k: v for k, v in params.items() if isinstance(v, str)}
 
     try:
         return await run_in_threadpool(
@@ -25,7 +26,7 @@ async def confirm(
             upload_id,
             decision,
             existing_id,
-            params,
+            str_params,
             id_service
         )
     except APIError as ex:

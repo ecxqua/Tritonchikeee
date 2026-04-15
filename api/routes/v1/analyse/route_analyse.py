@@ -3,7 +3,7 @@ from fastapi.concurrency import run_in_threadpool
 
 from api.dependencies import get_id_service, get_temp
 from api.routes.v1.analyse import service
-from api.models.file_data import FileData
+from api.models import FileData
 
 from pathlib import Path
 

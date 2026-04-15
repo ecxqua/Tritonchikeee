@@ -341,7 +341,7 @@ class IdentificationService:
     # ==========================================================================
     # Вспомогательные функции анализа
     # ==========================================================================
-    def get_crop(self, image_path: str, output_dir: str, crop_name: str, debug: bool):
+    def get_crop(self, image_path: str, output_dir: str | None, output_file: str | None, crop_name: str, debug: bool):
         """Обёртка над YOLO для вырезания брюшка
         
         Args:
@@ -352,6 +352,7 @@ class IdentificationService:
         yolo_result = process_single_image_sync(
             img_path=image_path,
             output_dir=output_dir,
+            output_file=output_file,
             trim_top_pct=self.config.get('seg-model', {}).get('trim_top_pct', 0.15),
             trim_bottom_pct=self.config.get('seg-model', {}).get('trim_bottom_pct', 0.3),
             final_size=self.config.get('seg-model', {}).get('final_size', 244),

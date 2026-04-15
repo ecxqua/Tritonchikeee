@@ -1,28 +1,64 @@
 from services.identification_service import IdentificationService
+from services.card_service import CardService
 from api.error import APIError
+from api.models import FileData
+from api.services.temp import TempStorage
 
-from utils.json_utils import make_json_safe
+from utils import sanitize_filename
 
 from typing import Any, Dict
 
 
 def add_new_card(
-    upload_id: int,
-    decision: str,
-    existing_id: str | None,
+    file_data: FileData,
+    species: str,
+    project_id: str | None,
+    template_type: str,
+    card_id: str | None,
     params: Dict[str, str],
-    id_service: IdentificationService
+    id_service: IdentificationService,
+    card_service: CardService,
+    temp: TempStorage
 ) -> Dict[str, Any]:
-    up = id_service.upload_service.get_upload(upload_id)
-    if not up or up["status"] not in ["pending"]:
-        raise APIError(f"Invalid upload code {upload_id}", status=400)
+    if card_id and card_service.get_individual(card_id):
+        raise APIError(msg=f"card_id {card_id} already taken", status=409)
 
-    if decision not in ["NEW", "MATCH", "CANCEL"]:
-        raise APIError("Invalid decision choice", status=400)
+    if project_id and not project_id.isnumeric():
+        raise APIError(msg="project_id must be an integer", status=400)
 
-    return make_json_safe(id_service.confirm_decision(
-        upload_id=upload_id,
-        decision=decision,
-        existing_card_id=existing_id,
-        card_data=params
-    ))
+    file_name = sanitize_filename(file_data.name)
+
+    path = temp.write_temp_file(
+        path=temp.make_temp_file_name(
+            begin_with=file_name,
+            end_with=file_data.ext
+        ),
+        data=file_data.data
+    ),
+
+    crop_output = temp.make_temp_file_name(
+        begin_with=f".{file_name}",
+        end_with=".CROP"
+    )
+
+    try:
+        id_service.get_crop(
+            image_path=str(path),
+            output_file=str(crop_output),
+            crop_name=file_name,
+            debug=False
+        )
+
+
+        id = card_service.save_new_individual(
+            photo_path_cropped=str(crop_output),
+            species=species,
+            project_id=int(project_id) if project_id else None,
+            template_type=template_type,
+            card_id=card_id,
+            card_data=params
+        )
+
+        return {"card_id": id}
+    except Exception as ex:
+        raise APIError(msg=str(ex), status=500)

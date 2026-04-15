@@ -1,14 +1,10 @@
 from services.identification_service import IdentificationService
 from api.services.temp import TempStorage
 from api.models.file_data import FileData
-from utils.json_utils import make_json_safe
+from utils import make_json_safe, sanitize_filename
 
 from typing import Any, Dict
 import re
-
-
-def sanitize_filename(name: str) -> str:
-    return re.sub(r"[^a-zA-Z0-9_-]", "_", name)
 
 
 def complete_analyse(

@@ -13,6 +13,7 @@ async def lifespan(api: FastAPI):
     temp = TempStorage()
 
     api.state.id_service = service
+    api.state.card_service = service.card_service
     api.state.temp = temp
 
     yield
