@@ -11,31 +11,45 @@ card_service = CardService(
     project_service=project_service
 )
 
-# # 2. Создать проект (если нужно)
-# project_id = project_service.get_or_create_project(
-#     name="Уральские тритоны",
-#     description="Исследование популяции",
-#     species_filter=["Карелина"]
+# 2. Создать проект (если нужно)
+project_id = project_service.get_or_create_project(
+    name="Уральские тритоны",
+    description="Исследование популяции",
+    species_filter=["Карелина"]
+)
+# project_id = 1
+# card_service.add_encounter(
+#     "NT-K-1",
+#     "КВ-1",
+#     "data/output_old/NT-K-1-КВ1_full_0526202d-263c-412b-9f32-736c5e36f872.jpg",
+#     "data/output_old/top5.jpg",
+#     status = 'мертв',
+#     water_body_number = 4,
+#     length_body = 0.2,
+#     length_tail = 0.1
 # )
-project_id = 1
-card_service.add_encounter(
-    "NT-K-1",
-    "КВ-1",
-    "data/output_old/NT-K-1-КВ1_full_0526202d-263c-412b-9f32-736c5e36f872.jpg",
-    "data/output_old/top5.jpg",
-    status = 'мертв',
-    water_body_number = 4,
-    length_body = 0.2,
-    length_tail = 0.1
+
+card_service.save_new_individual(
+    photo_path_cropped="data\input\image.png",
+    species="Карелина",
+    template_type="КВ-1",
+    project_id=2,
+    status='мертв',
+    water_body_number=4,
+    length_body=0.2,
+    length_tail=0.1
 )
 
-# 3. Получить список проектов
-projects = project_service.list_projects()
-print([p['name'] for p in projects])
+# # 3. Получить список проектов
+# projects = project_service.list_projects()
+# print([p['name'] for p in projects])
 
-# 4. Тестирование метода get_prototypes_by_project
-prototypes = card_service.get_prototypes_by_project(project_id)
-print(f"Найдено прототипов в проекте {project_id}: {len(prototypes)}")
+# # 4. Тестирование метода get_prototypes_by_project
+# prototypes = card_service.get_prototypes_by_project(project_id)
+# print(f"Найдено прототипов в проекте {project_id}: {len(prototypes)}")
 
-for proto in prototypes:
-    print(f"  {proto['prototype_id']} | {proto['species']} | карточек: {len(proto['cards'])}")
+# for proto in prototypes:
+#     print(f"  {proto['prototype_id']} | {proto['species']} | карточек: {len(proto['cards'])}")
+
+prototypes = card_service.get_prototypes_by_project(2)
+print(prototypes)

@@ -52,12 +52,12 @@ def get_transforms():
 def get_unprocessed_photos(cursor):
     """Получить все кропы без эмбеддинга (is_legacy=1, embedding_index=-1)"""
     cursor.execute('''
-        SELECT photo_id, individual_id, photo_path, photo_number
+        SELECT photo_id, card_id, photo_path, photo_number
         FROM photos
         WHERE is_legacy = 1 
           AND embedding_index = -1
           AND photo_type = 'cropped'
-        ORDER BY individual_id, photo_number
+        ORDER BY card_id, photo_number
     ''')
     
     return cursor.fetchall()
@@ -248,16 +248,16 @@ def verify_index():
     
     # Пример связи
     cursor.execute('''
-        SELECT i.individual_id, i.species, p.photo_path, p.embedding_index
-        FROM individuals i
-        JOIN photos p ON i.individual_id = p.individual_id
+        SELECT i.card_id, i.species, p.photo_path, p.embedding_index
+        FROM cards i
+        JOIN photos p ON i.card_id = p.card_id
         WHERE p.embedding_index != -1
         LIMIT 5
     ''')
     
     print("\n   📋 Примеры записей:")
     for row in cursor.fetchall():
-        print(f"      {row['individual_id']} ({row['species']}) → индекс {row['embedding_index']}")
+        print(f"      {row['card_id']} ({row['species']}) → индекс {row['embedding_index']}")
     
     conn.close()
 

@@ -183,7 +183,7 @@ class EmbeddingService:
             
             # Логгирование метаданных (если есть)
             if metadata:
-                ind_id = metadata.get('individual_id', 'Unknown')
+                ind_id = metadata.get('card_id', 'Unknown')
                 logger.debug(f"Добавлено в FAISS: {ind_id}")
         
         # Сохранение на диск

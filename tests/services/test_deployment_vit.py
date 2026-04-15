@@ -10,7 +10,7 @@ embedding = get_embedding("data/dataset_crop/test.jpg", model, DEFAULT_TRANSFORM
 results = search_with_faiss(
     query_embedding=embedding,
     prototype_embeddings=np.random.rand(100, 512),  # Из services
-    individual_ids=["NT-K-1", "NT-K-2", ...],       # Из services
+    card_ids=["NT-K-1", "NT-K-2", ...],       # Из services
     metadata=[{...}, {...}, ...],                   # Из services
     top_k=5
 )

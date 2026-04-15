@@ -10,7 +10,7 @@ start_time = time.time()
 
 # 2. Шаг 1: Анализ
 result = service.identify_and_prepare(
-    image_path="data/input/image3.jpg",
+    image_path="data/input/image.png",
     project_id=1,
     top_k=5,
     debug=True
@@ -37,17 +37,21 @@ if result['success']:
     #     }
     # )
     
-    # # Или (ПОВТОРНАЯ ВСТРЕЧА)
-    # confirm = service.confirm_decision(
-    #     upload_id=result['upload_id'],
-    #     decision='MATCH',
-    #     existing_card_id='NT-K-1-ИК1',
-    #     card_data={'status': 'жив'}
-    # )
-
+    # Или (ПОВТОРНАЯ ВСТРЕЧА)
     confirm = service.confirm_decision(
         upload_id=result['upload_id'],
-        decision='CANCEL'
+        decision='MATCH',
+        prototype_id='NT-K-10',
+        template_type='КВ-1',
+        status = 'мертв',
+        water_body_number = 4,
+        length_body = 0.2,
+        length_tail = 0.1
     )
+
+    # confirm = service.confirm_decision(
+    #     upload_id=result['upload_id'],
+    #     decision='CANCEL'
+    # )
 
 print("Финальное время обработки: ", time.time() - start_time)
