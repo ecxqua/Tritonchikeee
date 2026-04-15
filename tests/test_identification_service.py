@@ -41,7 +41,7 @@ if result['success']:
     # confirm = service.confirm_decision(
     #     upload_id=result['upload_id'],
     #     decision='MATCH',
-    #     existing_card_id='NT-K-1-ИК 1',
+    #     existing_card_id='NT-K-1-ИК1',
     #     card_data={'status': 'жив'}
     # )
 

@@ -27,6 +27,9 @@ from typing import Optional, List, Dict, Any
 import numpy as np
 import torch
 from torchvision import transforms
+import os
+import shutil
+import cv2
 import sqlite3
 
 from pipeline.deployment_yolo_new import process_single_image_sync
@@ -164,15 +167,36 @@ class IdentificationService:
                 final_size=self.config.get('seg-model', {}).get('final_size', 244),
                 seg_model_path=self.config.get('seg-model', {}).get('path', 'models/best_seg.pt'),
                 debug=debug,
-                return_array=False  # Сохраняем на диск для архива
+                return_array=True
             )
             
-            if not yolo_result['success']:
-                result['error'] = f"YOLO сегментация не удалась: {yolo_result.get('error', 'Unknown')}"
+            # --- НОВАЯ ЛОГИКА: работа с crop_array вместо crop_path ---
+            
+            # 1. Сохранение кропа из массива в config["cropped_folder"]
+            crop_array = yolo_result.get('crop_array')
+            if crop_array is not None:
+                cropped_folder = self.config.get("cropped_folder", "data/cropped")
+                os.makedirs(cropped_folder, exist_ok=True)
+                
+                # Формируем имя файла на основе оригинала
+                original_name = Path(image_path).stem
+                crop_filename = f"{original_name}_cropped.jpg"
+                crop_save_path = os.path.join(cropped_folder, crop_filename)
+                
+                cv2.imwrite(crop_save_path, crop_array, [int(cv2.IMWRITE_JPEG_QUALITY), 95])
+                result['crop_path'] = crop_save_path
+            else:
+                result['error'] = "crop_array не получен из process_single_image_sync"
                 return result
             
-            crop_path = yolo_result['crop_path']
-            result['crop_path'] = crop_path
+            # 2. Копирование оригинала в config["full_folder"]
+            full_folder = self.config.get("full_folder", "data/full")
+            os.makedirs(full_folder, exist_ok=True)
+            
+            original_filename = Path(image_path).name
+            full_save_path = os.path.join(full_folder, original_filename)
+            shutil.copy2(image_path, full_save_path)
+            result['full_path'] = full_save_path
             
             # === 2. ViT ЭМБЕДДИНГ ===
             logger.info(f"Вычисление эмбеддинга: {Path(crop_path).name}")
@@ -531,6 +555,7 @@ class IdentificationService:
         cursor = conn.cursor()
         
         # 🔥 ИЗМЕНЕНО: Добавлен JOIN с projects для получения project_name
+        # individual_id это NT-K-1-КВ1
         if project_id:
             cursor.execute('''
                 SELECT p.photo_id, p.individual_id, p.embedding_index, 
