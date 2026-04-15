@@ -339,6 +339,28 @@ class IdentificationService:
             return result
 
     # ==========================================================================
+    # Вспомогательные функции анализа
+    # ==========================================================================
+    def get_crop(self, image_path: str, output_dir: str, crop_name: str, debug: bool):
+        """Обёртка над YOLO для вырезания брюшка
+        
+        Args:
+            image_path (str): путь к исходному изображению.
+            output_dir (str): папка для вывода фото кропа брюшка.
+            crop_name (str): название файла с кропом (без суффикса).
+        """
+        yolo_result = process_single_image_sync(
+            img_path=image_path,
+            output_dir=output_dir,
+            trim_top_pct=self.config.get('seg-model', {}).get('trim_top_pct', 0.15),
+            trim_bottom_pct=self.config.get('seg-model', {}).get('trim_bottom_pct', 0.3),
+            final_size=self.config.get('seg-model', {}).get('final_size', 244),
+            seg_model_path=self.config.get('seg-model', {}).get('path', 'models/best_seg.pt'),
+            debug=debug,
+            return_array=False
+        )
+
+    # ==========================================================================
     # Входы для внесения карточек о новой особи и повторной встречи.
     # Объединение и управление card_service.py, upload_service.py
     # и embedding_service.py
