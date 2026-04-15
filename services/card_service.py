@@ -193,8 +193,7 @@ class CardService:
     
     def save_new_individual(
         self,
-        photo_path_full: Optional[str] = None,  # Обычно не исп.
-        photo_path_cropped: Optional[str] = None,
+        photo_path_cropped: Optional[str],
         species: str = "Карелина",
         project_id: Optional[int] = None,
         template_type: str = "ИК-1",
@@ -206,8 +205,16 @@ class CardService:
         """
         Сохраняет новую особь в базу данных (основная карточка + фотографии).
 
-        Переименовывает введённые full и cropped изображения в уникальные id по
+        Переименовывает введённое cropped изображение в уникальное id по
         схеме в rename_photo.
+
+        Args:
+            photo_path_cropped (str): путь к кропу брюшка.
+            species (str): тип тритона для добавления.
+            project_id (str): id проекта, куда добавится тритон (не рекомендуется оставлять пустым).
+            card_id: номер карточки (рекомендуется оставить пустым!)
+            photo_number: номер фото (рекомендуется оставить пустым!)
+            is_legacy: поле в таблице photos (рекомендуется оставить)
         """
         _validate_template_fields(template_type, card_data)
         
@@ -220,8 +227,6 @@ class CardService:
         # Сохраняем фотографию.
         if photo_path_cropped:
             photo_path_cropped = rename_photo(card_id, photo_path_cropped, suffix="cropped")
-        if photo_path_full:
-            photo_path_full = rename_photo(card_id, photo_path_full, suffix="full")
         logger.info("Сохранённый кроп: " + photo_path_cropped)
         
         if photo_number is None:
@@ -257,20 +262,6 @@ class CardService:
                 card_data.get('water_body_number')
             ))
             
-            # === ТАБЛИЦА 2: photos (полное фото) ===
-            # P.S. Мы не используем полное фото обычно.
-            if photo_path_full and not is_legacy:
-                cursor.execute('''
-                    INSERT INTO photos (
-                        card_id, photo_type, photo_number, photo_path,
-                        date_taken, time_taken, is_main, is_processed, embedding_index, is_legacy
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ''', (
-                    card_id, 'full', photo_number, photo_path_full,
-                    card_data.get('date', datetime.now().strftime("%d.%m.%Y")),
-                    card_data.get('meeting_time'), 1, 0, None, 0
-                ))
-            
             # === ТАБЛИЦА 2: photos (кроп брюшка) ===
             if photo_path_cropped:
                 cursor.execute('''
@@ -282,7 +273,7 @@ class CardService:
                     card_id, 'cropped', photo_number, photo_path_cropped,
                     card_data.get('date', datetime.now().strftime("%d.%m.%Y")),
                     card_data.get('meeting_time'), 
-                    1 if not photo_path_full else 0,
+                    1,
                     1,
                     -1,
                     1 if is_legacy else 0
@@ -320,7 +311,7 @@ class CardService:
         self,
         prototype_id: str,
         template_type: str,
-        photo_path_full: Optional[str] = None,  # Обычно не исп.
+        species: str = "Карелина",
         photo_path_cropped: Optional[str] = None,
         **card_data
     ) -> str:
@@ -347,8 +338,6 @@ class CardService:
         # Сохраняем фотографию
         if photo_path_cropped:
             photo_path_cropped = rename_photo(card_id, photo_path_cropped, suffix="cropped")
-        if photo_path_full:
-            photo_path_full = rename_photo(card_id, photo_path_full, suffix="full")
 
         conn = get_db_connection(self.db_path)
         cursor = conn.cursor()
@@ -368,7 +357,7 @@ class CardService:
                     created_at
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
-                card_id, template_type, "Карелина", project_id,
+                card_id, template_type, species, project_id,
                 card_data.get('date', datetime.now().strftime("%d.%m.%Y")),
                 card_data.get('time'), card_data.get('status'),
                 card_data.get('water_body_number'), card_data.get('water_body_name'),
@@ -377,12 +366,6 @@ class CardService:
                 card_data.get('sex'), card_data.get('notes'),
                 datetime.now().isoformat()
             ))
-            
-            if photo_path_full:
-                cursor.execute('''
-                    INSERT INTO photos (card_id, photo_type, photo_number, photo_path, date_taken, is_main, is_processed, embedding_index, is_legacy)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ''', (card_id, 'full', photo_number, photo_path_full, card_data.get('date'), 0, 0, None, 0))
             
             if photo_path_cropped:
                 cursor.execute('''

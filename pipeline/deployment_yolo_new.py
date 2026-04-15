@@ -326,6 +326,7 @@ def save_segmentation_debug(image: np.ndarray, mask: np.ndarray, output_dir: str
 async def process_single_image(
     img_path: str,
     output_dir: Optional[str] = None,
+    crop_name: Optional[str] = None,
     trim_top_pct: float = 0.15,
     trim_bottom_pct: float = 0.3,
     final_size: int = 244,
@@ -407,11 +408,14 @@ async def process_single_image(
         
         if return_array:
             result['crop_array'] = unwrapped
-
         # Сохранение на диск для дальнейшей обработки.
         if output_dir:
             os.makedirs(output_dir, exist_ok=True)
-            save_path = os.path.join(output_dir, "image_cropped.jpg")
+            if not crop_name:
+                crop_name = "image_cropped.jpg"
+            else:
+                crop_name = crop_name + ".jpg"
+            save_path = os.path.join(output_dir, crop_name)
             cv2.imwrite(save_path, unwrapped, [int(cv2.IMWRITE_JPEG_QUALITY), 95])
             result['crop_path'] = save_path
             logger.debug(f"Кроп сохранён: {save_path}")

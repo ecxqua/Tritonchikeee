@@ -339,6 +339,28 @@ class IdentificationService:
             return result
 
     # ==========================================================================
+    # Вспомогательные функции анализа
+    # ==========================================================================
+    def get_crop(self, image_path: str, output_dir: str, crop_name: str, debug: bool):
+        """Обёртка над YOLO для вырезания брюшка
+        
+        Args:
+            image_path (str): путь к исходному изображению.
+            output_dir (str): папка для вывода фото кропа брюшка.
+            crop_name (str): название файла с кропом (без суффикса).
+        """
+        yolo_result = process_single_image_sync(
+            img_path=image_path,
+            output_dir=output_dir,
+            trim_top_pct=self.config.get('seg-model', {}).get('trim_top_pct', 0.15),
+            trim_bottom_pct=self.config.get('seg-model', {}).get('trim_bottom_pct', 0.3),
+            final_size=self.config.get('seg-model', {}).get('final_size', 244),
+            seg_model_path=self.config.get('seg-model', {}).get('path', 'models/best_seg.pt'),
+            debug=debug,
+            return_array=False
+        )
+
+    # ==========================================================================
     # Входы для внесения карточек о новой особи и повторной встречи.
     # Объединение и управление card_service.py, upload_service.py
     # и embedding_service.py
@@ -363,12 +385,16 @@ class IdentificationService:
         embedding = np.array(upload['embedding'], dtype='float32')
         crop_path = upload['file_path']
         project_id = upload['project_id']  # 🔥 Уже есть project_id
+        if not 'species' in card_data:
+            raise Exception("В card_data не указан вид особи (Укажите, например 'Карелина')")
+        species = card_data['species']
         
         # Создать карточку через card_service (БЕЗ FAISS)
         # 🔥 Передаём project_id, card_service сам получит project_name если нужно
         # Внутри card_service СОХРАНЯЕТСЯ ФОТОГРАФИЯ НА ДИСКЕ
         card_id = self.card_service.save_new_individual(
             photo_path_cropped=crop_path,
+            species=species,
             project_id=project_id,  # 🔥 FK
             **card_data
         )
@@ -409,12 +435,16 @@ class IdentificationService:
         card_id = form_card_id(prototype_id, template_type)
         embedding = np.array(upload['embedding'], dtype='float32')
         crop_path = upload['file_path']
+        if not 'species' in card_data:
+            raise Exception("В card_data указан тип особи species для добавления повторной встречи: 'Карелина', etc.")
+        species = card_data['species']
         
         # Добавить встречу через card_service (БЕЗ FAISS)
         # Внутри card_service СОХРАНЯЕТС ФОТОГРАФИЯ НА ДИСКЕ
         self.card_service.add_encounter(
             prototype_id=prototype_id,
             template_type=card_data.get('template_type', 'КВ-1'),
+            species=species,
             photo_path_cropped=crop_path,
             **card_data
         )
