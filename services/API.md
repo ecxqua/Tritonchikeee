@@ -56,9 +56,9 @@ upload_id = result['upload_id']  # Получаем upload_id
 confirm = service.confirm_decision(
     upload_id: int,
     decision: str,
-    prototype_id: Optional[str] = None,
-    template_type: Optional[str] = None,
-    **card_data
+    prototype_id: Optional[str] = None,  # для MATCH
+    template_type: Optional[str] = None,  # для MATCH
+    **card_data  # для MATCH и NEW
 ) -> Dict[str, Any]:
 ```
 
