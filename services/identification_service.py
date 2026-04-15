@@ -385,12 +385,16 @@ class IdentificationService:
         embedding = np.array(upload['embedding'], dtype='float32')
         crop_path = upload['file_path']
         project_id = upload['project_id']  # 🔥 Уже есть project_id
+        if not 'species' in card_data:
+            raise Exception("В card_data не указан вид особи")
+        species = card_data['species']
         
         # Создать карточку через card_service (БЕЗ FAISS)
         # 🔥 Передаём project_id, card_service сам получит project_name если нужно
         # Внутри card_service СОХРАНЯЕТСЯ ФОТОГРАФИЯ НА ДИСКЕ
         card_id = self.card_service.save_new_individual(
             photo_path_cropped=crop_path,
+            species=species,
             project_id=project_id,  # 🔥 FK
             **card_data
         )
