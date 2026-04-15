@@ -193,8 +193,7 @@ class CardService:
     
     def save_new_individual(
         self,
-        photo_path_full: Optional[str] = None,  # Обычно не исп.
-        photo_path_cropped: Optional[str] = None,
+        photo_path_cropped: Optional[str],
         species: str = "Карелина",
         project_id: Optional[int] = None,
         template_type: str = "ИК-1",
@@ -220,8 +219,6 @@ class CardService:
         # Сохраняем фотографию.
         if photo_path_cropped:
             photo_path_cropped = rename_photo(card_id, photo_path_cropped, suffix="cropped")
-        if photo_path_full:
-            photo_path_full = rename_photo(card_id, photo_path_full, suffix="full")
         logger.info("Сохранённый кроп: " + photo_path_cropped)
         
         if photo_number is None:
@@ -257,20 +254,6 @@ class CardService:
                 card_data.get('water_body_number')
             ))
             
-            # === ТАБЛИЦА 2: photos (полное фото) ===
-            # P.S. Мы не используем полное фото обычно.
-            if photo_path_full and not is_legacy:
-                cursor.execute('''
-                    INSERT INTO photos (
-                        card_id, photo_type, photo_number, photo_path,
-                        date_taken, time_taken, is_main, is_processed, embedding_index, is_legacy
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ''', (
-                    card_id, 'full', photo_number, photo_path_full,
-                    card_data.get('date', datetime.now().strftime("%d.%m.%Y")),
-                    card_data.get('meeting_time'), 1, 0, None, 0
-                ))
-            
             # === ТАБЛИЦА 2: photos (кроп брюшка) ===
             if photo_path_cropped:
                 cursor.execute('''
@@ -282,7 +265,7 @@ class CardService:
                     card_id, 'cropped', photo_number, photo_path_cropped,
                     card_data.get('date', datetime.now().strftime("%d.%m.%Y")),
                     card_data.get('meeting_time'), 
-                    1 if not photo_path_full else 0,
+                    1,
                     1,
                     -1,
                     1 if is_legacy else 0
