@@ -11,7 +11,7 @@ cursor = conn.cursor()
 cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
 tables = [row[0] for row in cursor.fetchall()]
 print(f"Таблицы: {tables}")
-# Ожидаем: ['individuals', 'photos', 'uploads']
+# Ожидаем: ['cards', 'photos', 'uploads']
 
 # 3. Проверка индексов uploads
 cursor.execute("SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='uploads'")

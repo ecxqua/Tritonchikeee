@@ -38,6 +38,7 @@ data/output_old/
 data/cropped/
 data/embeddings/
 data/_temp_input
+data/full/
 
 # Training outputs and checkpoints
 keypoints_01_12_2025/

@@ -27,12 +27,15 @@ from typing import Optional, List, Dict, Any
 import numpy as np
 import torch
 from torchvision import transforms
+import os
+import shutil
+import cv2
 import sqlite3
 
 from pipeline.deployment_yolo_new import process_single_image_sync
 from pipeline.deployment_vit_faiss import load_model, get_embedding, EnhancedTripletNet, DEFAULT_TRANSFORM, search_vectors
 from services.embedding_service import EmbeddingService
-from services.card_service import CardService
+from services.card_service import CardService, extract_prototype_id, form_card_id
 from services.upload_service import UploadService
 from services.project_service import ProjectService
 from database.card_database import DB_PATH
@@ -140,6 +143,7 @@ class IdentificationService:
             'upload_id': None,
             'embedding': None,
             'crop_path': None,
+            'full_path': None,
             'candidates': [],
             'success': False,
             'error': None
@@ -164,15 +168,38 @@ class IdentificationService:
                 final_size=self.config.get('seg-model', {}).get('final_size', 244),
                 seg_model_path=self.config.get('seg-model', {}).get('path', 'models/best_seg.pt'),
                 debug=debug,
-                return_array=False  # Сохраняем на диск для архива
+                return_array=True
             )
             
-            if not yolo_result['success']:
-                result['error'] = f"YOLO сегментация не удалась: {yolo_result.get('error', 'Unknown')}"
-                return result
+            # --- НОВАЯ ЛОГИКА: работа с crop_array вместо crop_path ---
             
-            crop_path = yolo_result['crop_path']
-            result['crop_path'] = crop_path
+            # 1. Сохранение кропа из массива в config["cropped_folder"]
+            crop_array = yolo_result.get('crop_array')
+            if crop_array is not None:
+                cropped_folder = self.config.get("cropped_folder", "data/cropped")
+                os.makedirs(cropped_folder, exist_ok=True)
+                
+                # Формируем имя файла на основе оригинала
+                original_name = Path(image_path).stem
+                crop_filename = f"{original_name}_cropped.jpg"
+                crop_save_path = os.path.join(cropped_folder, crop_filename)
+                
+                cv2.imwrite(crop_save_path, crop_array, [int(cv2.IMWRITE_JPEG_QUALITY), 95])
+                result['crop_path'] = crop_save_path
+            else:
+                result['error'] = "crop_array не получен из process_single_image_sync"
+                return result
+
+            crop_path = result['crop_path']
+            
+            # 2. Копирование оригинала в config["full_folder"]
+            full_folder = self.config.get("full_folder", "data/full")
+            os.makedirs(full_folder, exist_ok=True)
+            
+            original_filename = Path(image_path).name
+            full_save_path = os.path.join(full_folder, original_filename)
+            shutil.copy2(image_path, full_save_path)
+            result['full_path'] = full_save_path
             
             # === 2. ViT ЭМБЕДДИНГ ===
             logger.info(f"Вычисление эмбеддинга: {Path(crop_path).name}")
@@ -208,8 +235,8 @@ class IdentificationService:
             prototypes = self._load_prototypes(project_id)
             
             candidates = []
-            if prototypes['individual_ids']:
-                logger.info(f"Найдено {len(prototypes['individual_ids'])} особей для поиска")
+            if prototypes['prototype_ids']:
+                logger.info(f"Найдено {len(prototypes['prototype_ids'])} особей для поиска")
                 candidates = self._search_similar(embedding, prototypes, top_k)
                 result['candidates'] = candidates
             else:
@@ -236,8 +263,9 @@ class IdentificationService:
         self,
         upload_id: int,
         decision: str,
-        card_data: Optional[Dict[str, Any]] = None,
-        existing_card_id: Optional[str] = None
+        prototype_id: Optional[str] = None,
+        template_type: Optional[str] = None,
+        **card_data
     ) -> Dict[str, Any]:
         """
         Подтвердить решение пользователя (Two-Phase Commit Шаг 2).
@@ -246,7 +274,8 @@ class IdentificationService:
             upload_id: ID временной загрузки (из identify_and_prepare)
             decision: Решение пользователя ('NEW', 'MATCH', 'CANCEL')
             card_data: Данные карточки (для NEW)
-            existing_card_id: ID существующей особи (для MATCH)
+            prototype_id: ID существующей особи (для MATCH)
+            template_type: тип шаблона для карточки (для NEW, MATCH)
         
         Returns:
             Dict:
@@ -259,7 +288,6 @@ class IdentificationService:
             'card_id': None,
             'message': None
         }
-        
         # === 1. Получить загрузку ===
         upload = self.upload_service.get_upload(upload_id)
         
@@ -280,11 +308,11 @@ class IdentificationService:
                 
             elif decision == 'MATCH':
                 # === ПОВТОРНАЯ ВСТРЕЧА ===
-                if not existing_card_id:
-                    result['message'] = "Не указан existing_card_id для MATCH"
+                if not prototype_id or not template_type:
+                    result['message'] = "Не указан card_id или template_type для MATCH"
                     return result
                 
-                card_id = self._handle_encounter(upload, existing_card_id, card_data or {})
+                card_id = self._handle_encounter(upload, prototype_id, template_type, card_data or {})
                 result['card_id'] = card_id
                 result['message'] = f"Добавлена встреча к особи: {card_id}"
                 
@@ -311,87 +339,6 @@ class IdentificationService:
             return result
 
     # ==========================================================================
-    # Проекты
-    # ==========================================================================
-
-    def get_or_create_project(self, project_name: str, description: str) -> int:
-        """Получает название проекта или создаёт новый.
-        
-        Args:
-            project_name: название проекта (существующее или новое).
-            description: описание проекта.
-
-        Returns:
-            int: существующий или созданный project_id проекта.
-        """
-        return self.project_service.get_or_create_project(
-            name=project_name,
-            description=description
-        )
-
-    def get_project_by_id(self, project_id: int) -> Optional[Dict[str, Any]]:
-        """Получает метаданные проекта по project_id в таблице projects."""
-        return self.project_service.get_project_by_id(project_id=project_id)
-
-    def get_project_id_by_name(self, project_name: str) -> Optional[int]:
-        """Получает метаданные проекта по project_name в таблице projects."""
-        return self.project_service.get_project_id_by_name(project_name=project_name)
-
-    def update_project(
-        self,
-        project_id: int,
-        **kwargs
-    ) -> bool:
-        """Обновляет поля проекта в таблице projects.
-        
-        Args:
-            project_id: id проекта в таблице projects.
-        """
-        return self.project_service.update_project(project_id=project_id, kwargs=kwargs)
-
-    def delete_project(self, project_id: int, confirm: bool = False) -> bool:
-        """Удаляет проект по project_id из таблицы projects.
-        
-        Args:
-            project_id: id проекта в таблице.
-            confirm: подтверждение удаления, по умолчанию False.
-
-        Returns:
-            bool: успешное выполнение операции.
-        """
-        return self.project_service.delete_project(
-            project_id=project_id,
-            confirm=confirm
-        )
-
-    def list_projects(self, active_only: bool = True) -> List[Dict[str, Any]]:
-        """Список проектов с метаданными из таблицы projects.
-
-        Args:
-            active_only: передать только проекты с меткой active.
-
-        Returns:
-            list[dict]: список проектов с доступом к полям (чтение)."""
-        return self.project_service.list_projects(active_only=active_only)
-
-    # ==========================================================================
-    # Временные загрузки
-    # ==========================================================================
-    # def cancel_upload(self, upload_id: int) -> bool:
-    #     """Отменяет загрузку по upload_id."""
-    #     return self.upload_service.cancel_upload(upload_id)
-
-    def cleanup_expired(self) -> int:
-        """
-        Очищает просроченные загрузки в uploads.
-        Для изменения expiry_hours см. `config.yaml`.
-
-        Returns:
-            int: число удалённых загрузок.
-        """
-        return self.upload_service.cleanup_expired()
-
-    # ==========================================================================
     # Входы для внесения карточек о новой особи и повторной встречи.
     # Объединение и управление card_service.py, upload_service.py
     # и embedding_service.py
@@ -410,7 +357,7 @@ class IdentificationService:
             card_data: Данные карточки от пользователя
         
         Returns:
-            str: individual_id созданной карточки
+            str: card_id созданной карточки
         """
         # Извлечь embedding из загрузки
         embedding = np.array(upload['embedding'], dtype='float32')
@@ -419,7 +366,8 @@ class IdentificationService:
         
         # Создать карточку через card_service (БЕЗ FAISS)
         # 🔥 Передаём project_id, card_service сам получит project_name если нужно
-        individual_id = self.card_service.save_new_individual(
+        # Внутри card_service СОХРАНЯЕТСЯ ФОТОГРАФИЯ НА ДИСКЕ
+        card_id = self.card_service.save_new_individual(
             photo_path_cropped=crop_path,
             project_id=project_id,  # 🔥 FK
             **card_data
@@ -427,7 +375,7 @@ class IdentificationService:
         
         # Добавить embedding в FAISS через embedding_service
         embedding_index = self.embedding_service.add(embedding, {
-            'individual_id': individual_id,
+            'card_id': card_id,
             'photo_path': crop_path
         })
         self.embedding_service.commit()
@@ -436,14 +384,15 @@ class IdentificationService:
         self._update_photo_embedding_index(crop_path, embedding_index)
         
         # Завершить загрузку
-        self.upload_service.complete_upload(upload_id=upload['id'], card_id=individual_id)
+        self.upload_service.complete_upload(upload_id=upload['id'], card_id=card_id)
         
-        return individual_id
+        return card_id
     
     def _handle_encounter(
         self,
         upload: Dict[str, Any],
-        existing_card_id: str,
+        prototype_id: str,
+        template_type: str,
         card_data: Dict[str, Any]
     ) -> str:
         """
@@ -451,18 +400,20 @@ class IdentificationService:
         
         Args:
             upload: Данные загрузки
-            existing_card_id: ID существующей особи
+            prototype_id: ID существующей особи
             card_data: Данные встречи
         
         Returns:
-            str: individual_id (тот же)
+            str: card_id
         """
+        card_id = form_card_id(prototype_id, template_type)
         embedding = np.array(upload['embedding'], dtype='float32')
         crop_path = upload['file_path']
         
         # Добавить встречу через card_service (БЕЗ FAISS)
+        # Внутри card_service СОХРАНЯЕТС ФОТОГРАФИЯ НА ДИСКЕ
         self.card_service.add_encounter(
-            individual_id=existing_card_id,
+            prototype_id=prototype_id,
             template_type=card_data.get('template_type', 'КВ-1'),
             photo_path_cropped=crop_path,
             **card_data
@@ -470,7 +421,7 @@ class IdentificationService:
         
         # Добавить embedding в FAISS
         embedding_index = self.embedding_service.add(embedding, {
-            'individual_id': existing_card_id,
+            'card_id': card_id,
             'photo_path': crop_path
         })
         self.embedding_service.commit()
@@ -479,9 +430,9 @@ class IdentificationService:
         self._update_photo_embedding_index(crop_path, embedding_index)
         
         # Завершить загрузку
-        self.upload_service.complete_upload(upload_id=upload['id'], card_id=existing_card_id)
+        self.upload_service.complete_upload(upload_id=upload['id'], card_id=card_id)
         
-        return existing_card_id
+        return card_id
     
     # ==========================================================================
     # ВНУТРЕННИЕ МЕТОДЫ
@@ -505,107 +456,89 @@ class IdentificationService:
     def _load_prototypes(self, project_id: Optional[int] = None) -> Dict[str, Any]:
         """
         Загрузить прототипы особей (средние эмбеддинги) из БД + FAISS.
-        
-        Args:
-            project_id: Фильтр по проекту (если None, все проекты)
-        
-        Returns:
-            Dict:
-                - individual_ids: List[str]
-                - embeddings: np.ndarray (n_individuals, 512)
-                - metadata: Dict[individual_id, Dict]
+        Группировка и усреднение — по биологической особи (прототипу), не по карточке.
         """
-        conn = sqlite3.connect(DB_PATH)
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
-        
-        # 🔥 ИЗМЕНЕНО: Добавлен JOIN с projects для получения project_name
-        if project_id:
-            cursor.execute('''
-                SELECT p.photo_id, p.individual_id, p.embedding_index, 
-                    i.species, i.template_type, i.project_id,
-                    pr.name as project_name  -- 🔥 Получаем имя проекта
-                FROM photos p
-                JOIN individuals i ON p.individual_id = i.individual_id
-                LEFT JOIN projects pr ON i.project_id = pr.id  -- 🔥 JOIN с projects
-                WHERE p.embedding_index != -1
-                AND p.photo_type = 'cropped'
-                AND i.project_id = ?
-                ORDER BY p.individual_id, p.photo_id
-            ''', (project_id,))
+        # 1. Определяем список проектов для итерации
+        if project_id is not None:
+            projects_to_process = [{'id': project_id, 'name': f'Project_{project_id}'}]
         else:
-            cursor.execute('''
-                SELECT p.photo_id, p.individual_id, p.embedding_index, 
-                    i.species, i.template_type, i.project_id,
-                    pr.name as project_name
-                FROM photos p
-                JOIN individuals i ON p.individual_id = i.individual_id
-                LEFT JOIN projects pr ON i.project_id = pr.id
-                WHERE p.embedding_index != -1
-                AND p.photo_type = 'cropped'
-                ORDER BY p.individual_id, p.photo_id
-            ''')
-        
-        rows = cursor.fetchall()
-        
-        if not rows:
-            conn.close()
-            return {
-                'individual_ids': [],
-                'embeddings': np.array([]),
-                'metadata': {}
-            }
-        
-        # Группировка по особям
-        groups: Dict[str, List[Dict]] = {}
-        metadata: Dict[str, Dict] = {}
-        
-        for row in rows:
-            ind_id = row['individual_id']
-            if ind_id not in groups:
-                groups[ind_id] = []
-                metadata[ind_id] = {
-                    'species': row['species'],
-                    'template_type': row['template_type'],
-                    'project_id': row['project_id'],  # 🔥 project_id
-                    'project_name': row['project_name']  # 🔥 Теперь это работает
-                }
-            groups[ind_id].append({
-                'embedding_index': row['embedding_index']
-            })
-        
-        conn.close()
-        
-        # Вычисление прототипов (средний эмбеддинг на особь)
-        individual_ids = []
-        prototype_embeddings = []
-        
-        for ind_id, photos in groups.items():
-            indices = [p['embedding_index'] for p in photos]
+            # list_projects возвращает List[Dict] с ключами: id, name, description, created_at...
+            projects_to_process = self.project_service.list_projects(active_only=False)
             
-            # Извлечь векторы из FAISS
+        # Кэш имён проектов для быстрого доступа в метаданных
+        project_names = {p['id']: p.get('name', f'Project_{p["id"]}') for p in projects_to_process}
+        
+        all_prototypes = []
+        for proj in projects_to_process:
+            pid = proj['id']
+            try:
+                protos = self.card_service.get_prototypes_by_project(pid)
+                all_prototypes.extend(protos)
+            except ValueError:
+                logger.warning(f"Пропущен проект {pid}: нарушение целостности данных")
+                continue
+                
+        if not all_prototypes:
+            return {'prototype_ids': [], 'embeddings': np.array([]), 'metadata': {}}
+            
+        prototype_ids = []
+        prototype_embeddings = []
+        metadata = {}
+        
+        for proto in all_prototypes:
+            proto_id = proto['prototype_id']
+            
+            # Получаем все фото всех карточек прототипа
+            photos = self.card_service.get_prototype_photos(proto_id)
+            
+            # Фильтр: только кропы с валидным embedding_index
+            valid_indices = [
+                p['embedding_index'] for p in photos
+                if p.get('photo_type') == 'cropped' and p.get('embedding_index') not in (None, -1)
+            ]
+            
+            if not valid_indices:
+                continue
+                
+            # Загрузка эмбеддингов из FAISS-сервиса
             embeddings_list = []
-            for idx in indices:
+            for idx in valid_indices:
                 emb = self.embedding_service.get_embedding_by_index(idx)
                 if emb is not None:
                     embeddings_list.append(emb)
-            
-            if embeddings_list:
-                # Средний эмбеддинг + L2 нормализация
-                prototype = np.mean(embeddings_list, axis=0)
-                norm = np.linalg.norm(prototype)
-                if norm > 1e-12:
-                    prototype = prototype / norm
+                    
+            if not embeddings_list:
+                continue
                 
-                individual_ids.append(ind_id)
-                prototype_embeddings.append(prototype)
-        
-        # Диагностика
+            # Усреднение + L2-нормализация
+            avg_emb = np.mean(embeddings_list, axis=0)
+            norm = np.linalg.norm(avg_emb)
+            if norm > 1e-12:
+                avg_emb = avg_emb / norm
+                
+            prototype_ids.append(proto_id)
+            prototype_embeddings.append(avg_emb)
+            
+            # Метаданные по всем карточкам особи
+            metadata[proto_id] = {
+                'species': proto.get('species'),
+                'project_id': proto.get('project_id'),
+                'project_name': project_names.get(proto.get('project_id'), 'Unknown'),
+                'cards': [
+                    {
+                        'card_id': c['card_id'],
+                        'template_type': c['template_type'],
+                        'photo_count': sum(1 for p in photos if p['card_id'] == c['card_id'] and p.get('embedding_index') not in (None, -1))
+                    }
+                    for c in proto.get('cards', [])
+                ]
+            }
+            
         embeddings_array = np.array(prototype_embeddings) if prototype_embeddings else np.array([])
-        logger.info(f"Загружено прототипов: {len(individual_ids)}, форма: {embeddings_array.shape}")
+        logger.info(f"Загружено прототипов: {len(prototype_ids)}, форма: {embeddings_array.shape}")
         
         return {
-            'individual_ids': individual_ids,
+            'prototype_ids': prototype_ids,
             'embeddings': embeddings_array,
             'metadata': metadata
         }
@@ -627,7 +560,7 @@ class IdentificationService:
         Returns:
             List[Dict]: Кандидаты с метаданными
         """
-        if not prototypes['individual_ids']:
+        if not prototypes['prototype_ids']:
             return []
         
         # Поиск через pipeline (чистая математика)
@@ -640,11 +573,11 @@ class IdentificationService:
         # Обогатить метаданными
         candidates = []
         for idx, similarity in results:
-            ind_id = prototypes['individual_ids'][idx]
+            ind_id = prototypes['prototype_ids'][idx]
             meta = prototypes['metadata'].get(ind_id, {})
             
             candidates.append({
-                'individual_id': ind_id,
+                'prototype_id': ind_id,
                 'species': meta.get('species', 'Unknown'),
                 'template_type': meta.get('template_type', 'Unknown'),
                 'project_name': meta.get('project_name', 'Unknown'),  # Для отображения

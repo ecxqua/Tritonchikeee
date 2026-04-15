@@ -20,6 +20,7 @@ db:
   db_path: "database/cards.db"
   faiss_index_path: "data/embeddings/database_embeddings.pkl"
   cropped_folder: "data/cropped/"
+  full_folder: "data/full/"
   "expiry_hours": 0.00001  # Через сколько просрочиваются записи в uploads
 
 view:

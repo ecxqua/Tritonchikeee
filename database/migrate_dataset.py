@@ -3,7 +3,7 @@
 
 Работает с новой схемой:
     - ✅ projects таблица (id, name, description)
-    - ✅ individuals.project_id (FK → projects.id)
+    - ✅ cards.project_id (FK → projects.id)
     - ✅ uploads.project_id (FK → projects.id)
 """
 
@@ -57,30 +57,30 @@ def get_or_create_project(cursor, project_name: str, description: str = None) ->
     
     return cursor.lastrowid
 
-def individual_exists(cursor, individual_id: str) -> bool:
+def individual_exists(cursor, card_id: str) -> bool:
     """Проверить, существует ли карточка в БД."""
     cursor.execute(
-        "SELECT individual_id FROM individuals WHERE individual_id = ?",
-        (individual_id,)
+        "SELECT card_id FROM cards WHERE card_id = ?",
+        (card_id,)
     )
     return cursor.fetchone() is not None
 
-def create_individual(cursor, individual_id: str, species: str, project_id: int, template_type: str = DEFAULT_TEMPLATE):
+def create_individual(cursor, card_id: str, species: str, project_id: int, template_type: str = DEFAULT_TEMPLATE):
     """Создать запись о карточке особи."""
     cursor.execute('''
-        INSERT OR IGNORE INTO individuals
-        (individual_id, template_type, species, project_id, created_at)
+        INSERT OR IGNORE INTO cards
+        (card_id, template_type, species, project_id, created_at)
         VALUES (?, ?, ?, ?, ?)
-    ''', (individual_id, template_type, species, project_id, datetime.now()))
+    ''', (card_id, template_type, species, project_id, datetime.now()))
 
-def create_photo(cursor, individual_id: str, photo_path: Path, photo_number: str, is_main: bool = False, is_legacy: bool = True) -> int:
+def create_photo(cursor, card_id: str, photo_path: Path, photo_number: str, is_main: bool = False, is_legacy: bool = True) -> int:
     """Создать запись о фотографии."""
     cursor.execute('''
         INSERT INTO photos
-        (individual_id, photo_type, photo_number, photo_path, is_main, is_legacy, embedding_index, is_processed)
+        (card_id, photo_type, photo_number, photo_path, is_main, is_legacy, embedding_index, is_processed)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     ''', (
-        individual_id,
+        card_id,
         "cropped",
         photo_number,
         str(photo_path),
@@ -111,9 +111,9 @@ def migrate_dataset() -> dict:
     )
     print(f"✅ Проект: '{PROJECT_NAME}' (ID={project_id})")
     
-    total_individuals = 0
+    total_cards = 0
     total_photos = 0
-    skipped_individuals = 0
+    skipped_cards = 0
     
     for species_key, config in SPECIES_CONFIG.items():
         species_folder = config["folder"]
@@ -136,22 +136,22 @@ def migrate_dataset() -> dict:
         for individual_folder in individual_folders:
             # Формирование ID: NT-K-1-ИК1
             animal_num = individual_folder.name
-            individual_id = f"NT-{species_prefix}-{animal_num}-{DEFAULT_TEMPLATE.replace('-', '')}"
+            card_id = f"NT-{species_prefix}-{animal_num}-{DEFAULT_TEMPLATE.replace('-', '')}"
             
-            if individual_exists(cursor, individual_id):
-                print(f"   ⏭️ Пропущено: {individual_id} (уже в БД)")
-                skipped_individuals += 1
+            if individual_exists(cursor, card_id):
+                print(f"   ⏭️ Пропущено: {card_id} (уже в БД)")
+                skipped_cards += 1
                 continue
             
             # 🔥 Используем project_id (FK)
             create_individual(
                 cursor=cursor,
-                individual_id=individual_id,
+                card_id=card_id,
                 species=species_name,
                 project_id=project_id  # ← FOREIGN KEY
             )
-            total_individuals += 1
-            print(f"   ✅ Добавлено: {individual_id}")
+            total_cards += 1
+            print(f"   ✅ Добавлено: {card_id}")
             
             # Поиск фотографий
             photos = sorted(individual_folder.glob("*.jpg"))
@@ -168,7 +168,7 @@ def migrate_dataset() -> dict:
                 
                 create_photo(
                     cursor=cursor,
-                    individual_id=individual_id,
+                    card_id=card_id,
                     photo_path=photo_path,
                     photo_number=photo_number,
                     is_main=is_main,
@@ -182,15 +182,15 @@ def migrate_dataset() -> dict:
     
     print("\n" + "=" * 60)
     print("📊 ИТОГИ МИГРАЦИИ:")
-    print(f"   ✅ Карточек добавлено: {total_individuals}")
+    print(f"   ✅ Карточек добавлено: {total_cards}")
     print(f"   ✅ Фото добавлено: {total_photos}")
-    print(f"   ⏭️ Карточек пропущено: {skipped_individuals}")
+    print(f"   ⏭️ Карточек пропущено: {skipped_cards}")
     print("=" * 60)
     
     return {
-        "individuals_added": total_individuals,
+        "cards_added": total_cards,
         "photos_added": total_photos,
-        "individuals_skipped": skipped_individuals
+        "cards_skipped": skipped_cards
     }
 
 def verify_migration():
@@ -202,7 +202,7 @@ def verify_migration():
     # Карточки по видам (через JOIN с projects)
     cursor.execute('''
         SELECT i.species, COUNT(*) as count, p.name as project_name
-        FROM individuals i
+        FROM cards i
         JOIN projects p ON i.project_id = p.id
         WHERE p.name = ?
         GROUP BY i.species
@@ -216,7 +216,7 @@ def verify_migration():
     cursor.execute('''
         SELECT photo_type, is_legacy, COUNT(*) as count
         FROM photos
-        WHERE individual_id LIKE 'NT-%'
+        WHERE card_id LIKE 'NT-%'
         GROUP BY photo_type, is_legacy
     ''')
     
@@ -235,8 +235,8 @@ def verify_migration():
     
     # Примеры ID
     cursor.execute('''
-        SELECT i.individual_id, p.name as project_name
-        FROM individuals i
+        SELECT i.card_id, p.name as project_name
+        FROM cards i
         JOIN projects p ON i.project_id = p.id
         WHERE p.name = ?
         LIMIT 5
@@ -244,7 +244,7 @@ def verify_migration():
     
     print("\n📋 Примеры ID карточек:")
     for row in cursor.fetchall():
-        print(f"   {row['individual_id']} (проект: {row['project_name']})")
+        print(f"   {row['card_id']} (проект: {row['project_name']})")
     
     conn.close()
 
