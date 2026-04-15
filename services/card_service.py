@@ -114,7 +114,7 @@ def _get_next_photo_number(cursor: sqlite3.Cursor, card_id: str) -> str:
 
 def rename_photo(card_id: str, photo_path: str, suffix: str):
     """
-        Переименовывае фотографию с уникальным названием,
+        Переименовывает фотографию с уникальным названием,
         которая прикрепляется к записи в photos.
 
         Формат: 'card_id' + 'suffix' + 'uuid для фото'
