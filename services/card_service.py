@@ -194,7 +194,6 @@ class CardService:
     def save_new_individual(
         self,
         photo_path_cropped: Optional[str],
-        species: str = "Карелина",
         project_id: Optional[int] = None,
         template_type: str = "ИК-1",
         card_id: Optional[str] = None,
@@ -210,11 +209,10 @@ class CardService:
 
         Args:
             photo_path_cropped (str): путь к кропу брюшка.
-            species (str): тип тритона для добавления.
             project_id (str): id проекта, куда добавится тритон (не рекомендуется оставлять пустым).
             card_id: номер карточки (рекомендуется оставить пустым!)
             photo_number: номер фото (рекомендуется оставить пустым!)
-            is_legacy: поле в таблице photos (рекомендуется оставить пустым!)
+            is_legacy: поле в таблице photos (рекомендуется оставить)
         """
         _validate_template_fields(template_type, card_data)
         
@@ -247,7 +245,7 @@ class CardService:
                     meeting_time, status, water_body_number
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
-                card_id, template_type, species, project_id,
+                card_id, template_type, card_data.get("species", "Карелина"), project_id,
                 datetime.now().isoformat(),
                 card_data.get('date', datetime.now().strftime("%d.%m.%Y")),
                 card_data.get('notes'),
