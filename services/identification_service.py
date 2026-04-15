@@ -435,12 +435,16 @@ class IdentificationService:
         card_id = form_card_id(prototype_id, template_type)
         embedding = np.array(upload['embedding'], dtype='float32')
         crop_path = upload['file_path']
+        if not 'species' in card_data:
+            raise Exception("В card_data указан тип особи species для добавления повторной встречи: 'Карелина', etc.")
+        species = card_data['species']
         
         # Добавить встречу через card_service (БЕЗ FAISS)
         # Внутри card_service СОХРАНЯЕТС ФОТОГРАФИЯ НА ДИСКЕ
         self.card_service.add_encounter(
             prototype_id=prototype_id,
             template_type=card_data.get('template_type', 'КВ-1'),
+            species=species,
             photo_path_cropped=crop_path,
             **card_data
         )

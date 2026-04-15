@@ -311,6 +311,7 @@ class CardService:
         self,
         prototype_id: str,
         template_type: str,
+        species: str = "Карелина",
         photo_path_cropped: Optional[str] = None,
         **card_data
     ) -> str:
@@ -356,7 +357,7 @@ class CardService:
                     created_at
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
-                card_id, template_type, "Карелина", project_id,
+                card_id, template_type, species, project_id,
                 card_data.get('date', datetime.now().strftime("%d.%m.%Y")),
                 card_data.get('time'), card_data.get('status'),
                 card_data.get('water_body_number'), card_data.get('water_body_name'),
