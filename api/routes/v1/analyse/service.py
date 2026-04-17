@@ -4,7 +4,6 @@ from api.models.file_data import FileData
 from utils import make_json_safe, sanitize_filename
 
 from typing import Any, Dict
-import re
 
 
 def complete_analyse(
