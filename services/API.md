@@ -20,9 +20,10 @@ service = create_identification_service()
 Как получить id проекта? С помощью `service.get_or_create_project()`.
 ```python
 result = service.identify_and_prepare(
-    image_path="data/input/image3.jpg",
+    image_path="data/input/image.png",
     project_id=1,
     top_k=5,
+    ...  # Будут параметры для фильтрации!
     debug=True
 )
 ```
@@ -54,12 +55,16 @@ upload_id = result['upload_id']  # Получаем upload_id
 
 ```python
 confirm = service.confirm_decision(
-    upload_id: int,
-    decision: str,
-    prototype_id: Optional[str] = None,  # для MATCH
-    template_type: Optional[str] = None,  # для MATCH
-    **card_data  # для MATCH и NEW
-) -> Dict[str, Any]:
+    upload_id=result['upload_id'],
+    decision='NEW',
+    template_type="ИК-1",
+    species="Карелина",
+    **{
+        'length_body': 55,
+        'weight': 3.22,
+        'sex': 'М'
+    }
+)
 ```
 
 ```python
@@ -119,6 +124,78 @@ prototypes: List[Dict[str, Any]] = card_service.get_all_prototypes()
 all_cards: List[Dict[str, Any]] = card_service.get_cards_by_project(
     project_id: int
 )
+```
+
+### ВАЖНО! Для CREATE используйте только методы identification_service!
+### Добавление карточки новой особи (ИК-1/ИК-2)
+```python
+save_result = service.add_new_individual(
+    species="Карелина",
+    image_path="data/input/image.png",
+    project_id=1,
+    template_type="ИК-1",
+    **{
+        'length_body': 55,
+        'weight': 3.22,
+        'sex': 'М'
+    }
+)
+```
+```python
+Modes:
+    image_path: обработка полного фото (ещё не вырезано)
+    process_result: обработка с уже полученным вырезанным брюшком и эмбеддингом
+```
+```python
+Returns Dict[str, Any]:
+    crop_path: путь к вырезанному брюшку
+    full_path: путь к полному фото
+    success: успешность операции
+    card_id: id сохранённой карточки
+    error: сообщение об ошибке
+```
+
+### Добавление карточки повторной встречи с особью (КВ-1/КВ-2)
+```python
+save_result = service.add_encounter(
+    prototype_id="NT-K-2",
+    template_type="КВ-1",
+    species="Карелина",
+    image_path="data/input/image.png",
+    **{
+        "status": "жив",
+        "water_body_number": 0.5,
+        "length_body": 0.4,
+        "length_tail": 0.1
+    }
+)
+```
+```python
+Modes:
+    image_path: обработка полного фото (ещё не вырезано)
+    process_result: обработка с уже полученным вырезанным брюшком и эмбеддингом
+```
+```python
+Returns Dict[str, Any]:
+    crop_path: путь к вырезанному брюшку
+    full_path: путь к полному фото
+    success: успешность операции
+    card_id: id сохранённой карточки
+    error: сообщение об ошибке
+```
+
+### Добавление нового фото к карточке
+```python
+save_result = service.add_photo_to_card(
+    card_id="NT-K-1-ИК1",
+    image_path="data/input/image.png"
+)
+```
+```python
+Returns Dict[str, Any]:
+    crop_path: путь к вырезанному брюшку
+    success: успешность операции
+    error: сообщение об ошибке
 ```
 
 Больше методов в `services/card_service.py`

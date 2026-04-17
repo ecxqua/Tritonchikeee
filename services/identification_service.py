@@ -53,6 +53,7 @@ logger = logging.getLogger(__name__)
 
 SUPPORTED_TEMPLATES = ['ИК-1', 'ИК-2', 'КВ-1', 'КВ-2']
 SUPPORTED_SPECIES = ['Карелина', 'Гребенчатый']
+CROPPED_NAME = "yolo_cropped.jpg"
 
 # =============================================================================
 # IDENTIFICATION SERVICE
@@ -107,6 +108,7 @@ class IdentificationService:
     # ШАГ 1: АНАЛИЗ + ПОДГОТОВКА
     # ==========================================================================
     
+    
     def identify_and_prepare(
         self,
         image_path: str,
@@ -155,75 +157,23 @@ class IdentificationService:
             if not project:
                 raise ValueError(f"Проект с ID={project_id} не найден")
 
-            # === 1. YOLO СЕГМЕНТАЦИЯ ===
-            logger.info(f"Сегментация: {Path(image_path).name}")
-            
-            output_dir = self.config.get('db', {}).get('cropped_folder', 'cropped/temp')
-            
-            yolo_result = process_single_image_sync(
-                img_path=image_path,
-                output_dir=output_dir,
-                trim_top_pct=self.config.get('seg-model', {}).get('trim_top_pct', 0.15),
-                trim_bottom_pct=self.config.get('seg-model', {}).get('trim_bottom_pct', 0.3),
-                final_size=self.config.get('seg-model', {}).get('final_size', 244),
-                seg_model_path=self.config.get('seg-model', {}).get('path', 'models/best_seg.pt'),
-                debug=debug,
-                return_array=True
-            )
-            
-            # --- НОВАЯ ЛОГИКА: работа с crop_array вместо crop_path ---
-            
-            # 1. Сохранение кропа из массива в config["cropped_folder"]
-            crop_array = yolo_result.get('crop_array')
-            if crop_array is not None:
-                cropped_folder = self.config.get("cropped_folder", "data/cropped")
-                os.makedirs(cropped_folder, exist_ok=True)
-                
-                # Формируем имя файла на основе оригинала
-                original_name = Path(image_path).stem
-                crop_filename = f"{original_name}_cropped.jpg"
-                crop_save_path = os.path.join(cropped_folder, crop_filename)
-                
-                cv2.imwrite(crop_save_path, crop_array, [int(cv2.IMWRITE_JPEG_QUALITY), 95])
-                result['crop_path'] = crop_save_path
-            else:
-                result['error'] = "crop_array не получен из process_single_image_sync"
-                return result
-
-            crop_path = result['crop_path']
-            
-            # 2. Копирование оригинала в config["full_folder"]
-            full_folder = self.config.get("full_folder", "data/full")
-            os.makedirs(full_folder, exist_ok=True)
-            
-            original_filename = Path(image_path).name
-            full_save_path = os.path.join(full_folder, original_filename)
-            shutil.copy2(image_path, full_save_path)
-            result['full_path'] = full_save_path
-            
-            # === 2. ViT ЭМБЕДДИНГ ===
-            logger.info(f"Вычисление эмбеддинга: {Path(crop_path).name}")
-            
-            embedding = get_embedding(
-                crop_path,
-                self.vit_model,
-                self.transform,
-                self.device
-            )
-            
-            if embedding is None:
-                result['error'] = "Не удалось вычислить эмбеддинг"
+            # Обработка
+            process_result = self.get_crop_and_embedding(image_path, debug)
+            if process_result['error']:
+                result['error'] = process_result['error']
                 return result
             
-            result['embedding'] = embedding
+            result['embedding'] = process_result['embedding']
+            result['crop_path'] = process_result['crop_path']
+            result['full_path'] = process_result['crop_path']
             
             # === 3. СОЗДАНИЕ ВРЕМЕННОЙ ЗАГРУЗКИ ===
             logger.info(f"Создание загрузки (проект ID={project_id})")
             
             upload_id = self.upload_service.create_upload(
                 project_id=project_id,  # 🔥 FK, валидация внутри upload_service
-                file_path=crop_path,
-                embedding=embedding,
+                file_path=process_result['crop_path'],
+                embedding=process_result['embedding'],
                 expiry_hours=self.config.get('db', {}).get('expiry_hours', 24)
             )
             
@@ -237,7 +187,7 @@ class IdentificationService:
             candidates = []
             if prototypes['prototype_ids']:
                 logger.info(f"Найдено {len(prototypes['prototype_ids'])} особей для поиска")
-                candidates = self._search_similar(embedding, prototypes, top_k)
+                candidates = self._search_similar(process_result['embedding'], prototypes, top_k)
                 result['candidates'] = candidates
             else:
                 logger.info("В базе нет особей для поиска (новая база или пустой проект)")
@@ -263,9 +213,10 @@ class IdentificationService:
         self,
         upload_id: int,
         decision: str,
+        species: Optional[str] = "Карелина",
         prototype_id: Optional[str] = None,
         template_type: Optional[str] = None,
-        **card_data
+        **card_data: Dict[str, Any]
     ) -> Dict[str, Any]:
         """
         Подтвердить решение пользователя (Two-Phase Commit Шаг 2).
@@ -273,6 +224,7 @@ class IdentificationService:
         Args:
             upload_id: ID временной загрузки (из identify_and_prepare)
             decision: Решение пользователя ('NEW', 'MATCH', 'CANCEL')
+            species: вид тритона: "Карелина", "Ребристый" (для NEW, MATCH)
             card_data: Данные карточки (для NEW)
             prototype_id: ID существующей особи (для MATCH)
             template_type: тип шаблона для карточки (для NEW, MATCH)
@@ -300,9 +252,22 @@ class IdentificationService:
             return result
         
         try:
+            process_result: Dict[str, Any] = {
+                'embedding': upload['embedding'],
+                'crop_path': upload['file_path'],
+                'full_path': None,
+            }
             if decision == 'NEW':
                 # === НОВАЯ ОСОБЬ ===
-                card_id = self._handle_new_individual(upload, card_data or {})
+                add_result = self.add_new_individual(
+                    species=species,
+                    project_id=upload['project_id'],
+                    template_type=template_type,
+                    process_result=process_result,
+                    **card_data
+                )
+                card_id = add_result['card_id']
+                self.upload_service.complete_upload(upload_id=upload['id'], card_id=card_id)
                 result['card_id'] = card_id
                 result['message'] = f"Создана новая особь: {card_id}"
                 
@@ -312,7 +277,15 @@ class IdentificationService:
                     result['message'] = "Не указан card_id или template_type для MATCH"
                     return result
                 
-                card_id = self._handle_encounter(upload, prototype_id, template_type, card_data or {})
+                add_result = self.add_encounter(
+                    prototype_id=prototype_id,
+                    template_type=template_type,
+                    species=species,
+                    process_result=process_result,
+                    **card_data
+                )
+                card_id = add_result['card_id']
+                self.upload_service.complete_upload(upload_id=upload['id'], card_id=card_id)
                 result['card_id'] = card_id
                 result['message'] = f"Добавлена встреча к особи: {card_id}"
                 
@@ -340,25 +313,88 @@ class IdentificationService:
 
     # ==========================================================================
     # Вспомогательные функции анализа
-    # ==========================================================================
-    def get_crop(self, image_path: str, output_dir: str, crop_name: str, debug: bool):
-        """Обёртка над YOLO для вырезания брюшка
+    # =========================================================================
+    def get_crop_and_embedding(
+        self,
+        image_path: str,
+        debug: bool = False
+    ) -> Dict[str, Any]:
+        """
+        Универсальный обработчик фото с выдачей кропов и эмбеддингов.
+        Важно! Выданные пути к кропу и полному фото - временные.
+        Учтите, что внутри пайплайна эти названия зарезервированы для быстрого удаления.
         
         Args:
-            image_path (str): путь к исходному изображению.
-            output_dir (str): папка для вывода фото кропа брюшка.
-            crop_name (str): название файла с кропом (без суффикса).
+            image_path: путь к полному фото для обработки.
+        
+        Returns Dict[str, Any]:
+            embedding: полученный по фото эмбеддинг
+            crop_path: путь к вырезанному брюшку
+            full_path: путь к полному фото
+            success: успешность операции
+            error: сообщение об ошибке
         """
+        result: Dict[str, Any] = {
+            'embedding': None,
+            'crop_path': None,
+            'full_path': None,
+            'success': False,
+            'error': None
+        }
+        # Сегментация  
+        output_dir = self.config.get('db', {}).get('cropped_folder', 'cropped/temp') 
         yolo_result = process_single_image_sync(
             img_path=image_path,
             output_dir=output_dir,
+            crop_name=CROPPED_NAME,
             trim_top_pct=self.config.get('seg-model', {}).get('trim_top_pct', 0.15),
             trim_bottom_pct=self.config.get('seg-model', {}).get('trim_bottom_pct', 0.3),
             final_size=self.config.get('seg-model', {}).get('final_size', 244),
             seg_model_path=self.config.get('seg-model', {}).get('path', 'models/best_seg.pt'),
             debug=debug,
-            return_array=False
+            return_array=True
         )
+    
+        # 1. Сохранение кропа из массива в config["cropped_folder"]
+        crop_array = yolo_result.get('crop_array')
+        if crop_array is not None:
+            cropped_folder = self.config.get("cropped_folder", "data/cropped")
+            os.makedirs(cropped_folder, exist_ok=True)
+            
+            # Формируем имя файла на основе оригинала
+            original_name = Path(image_path).stem
+            crop_filename = f"{original_name}_cropped.jpg"
+            crop_save_path = os.path.join(cropped_folder, crop_filename)
+            
+            cv2.imwrite(crop_save_path, crop_array, [int(cv2.IMWRITE_JPEG_QUALITY), 95])
+            result['crop_path'] = crop_save_path
+        else:
+            result['error'] = "crop_array не получен из process_single_image_sync"
+            return result
+
+        crop_path = result['crop_path']
+        # 2. Копирование оригинала в config["full_folder"]
+        full_folder = self.config.get("full_folder", "data/full")
+        os.makedirs(full_folder, exist_ok=True)
+
+        original_filename = Path(image_path).name
+        full_save_path = os.path.join(full_folder, original_filename)
+        shutil.copy2(image_path, full_save_path)
+        result['full_path'] = full_save_path
+
+        # Извлечение embedding
+        embedding = get_embedding(
+            crop_path,
+            self.vit_model,
+            self.transform,
+            self.device
+        )
+        if embedding is None:
+            result['error'] = "Не удалось вычислить эмбеддинг"
+            return result
+        result["embedding"] = embedding
+        result['success'] = True
+        return result
 
     # ==========================================================================
     # Входы для внесения карточек о новой особи и повторной встречи.
@@ -366,103 +402,224 @@ class IdentificationService:
     # и embedding_service.py
     # ==========================================================================
 
-    def _handle_new_individual(
+    def add_photo_to_card(
         self,
-        upload: Dict[str, Any],
-        card_data: Dict[str, Any]
-    ) -> str:
+        card_id: str,
+        image_path: Optional[str] = None,
+        process_result: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
         """
-        Обработать решение NEW (создать новую особь).
+        Обработать фото и связать его с существующей карточкой (кроп + эмбеддинг + сохранение + индекс).
+        
+        Modes:
+            image_path: обработка полного фото (ещё не вырезано)
+            process_result: обработка с уже полученным вырезанным брюшком и эмбеддингом
         
         Args:
-            upload: Данные загрузки
-            card_data: Данные карточки от пользователя
+            image_path: полное изображение обработки (не указывать только при наличии process_result).
+            card_id: id карточки для добавления фото.
+            process_result: Если обработка уже была совершена, то можно подгрузить данные:
+            {
+                embedding: эмбеддинг фото
+                crop_path: путь к вырезанному брюшку
+                full_path: путь к полному фото
+            }
+            По умолчанию обработка совершается.
         
-        Returns:
-            str: card_id созданной карточки
+        Returns Dict[str, Any]:
+            crop_path: путь к вырезанному брюшку
+            success: успешность операции
+            error: сообщение об ошибке
         """
-        # Извлечь embedding из загрузки
-        embedding = np.array(upload['embedding'], dtype='float32')
-        crop_path = upload['file_path']
-        project_id = upload['project_id']  # 🔥 Уже есть project_id
-        if not 'species' in card_data:
-            raise Exception("В card_data не указан вид особи (Укажите, например 'Карелина')")
-        species = card_data['species']
+        result: Dict[str, Any] = {
+            'crop_path': None,
+            'success': False,
+            'error': None
+        }
+        # Обработка
+        if not process_result:
+            process_result = self.get_crop_and_embedding(image_path)
+            if process_result['error']:
+                result['error'] = process_result['error']
+                return result
+        
+        result['card_id'] = card_id
+        
+        # Добавление фото в БД
+        save_result = self.card_service.add_photo_to_card(process_result['crop_path'], card_id=card_id)
+        
+        if save_result['success']:
+            # Добавить embedding в FAISS через embedding_service
+            embedding_index = self.embedding_service.add(process_result['embedding'], {
+                'card_id': card_id,
+                'photo_path': save_result['crop_path']
+            })
+            self.embedding_service.commit()
+            
+            # Обновить photos.embedding_index в БД
+            self._update_photo_embedding_index(save_result['crop_path'], embedding_index)
+
+            result['success'] = True
+            result['crop_path'] = save_result['crop_path']
+            return result
+        else:
+            result['success'] = True
+            result['error'] = "Ошибка добавления фото к карточке. Возможно, карточки не существует или путь указан неверно!"
+            return result
+        
+    def add_new_individual(
+        self,
+        species: str,
+        project_id: Optional[int] = None,
+        template_type: str = "ИК-1",
+        image_path: Optional[str] = None,
+        process_result: Optional[Dict[str, Any]] = None,
+        **card_data
+    ):
+        """
+        Обработать фото и создать запись в базах данных (кроп + эмбеддинг + сохранение + индекс).
+        Не включает анализ. Создаёт новую карточку, не повторную (ИК-1/ИК-2)
+
+        Modes:
+            image_path: обработка полного фото (ещё не вырезано)
+            process_result: обработка с уже полученным вырезанным брюшком и эмбеддингом
+        
+        Args:
+            image_path: Полное изображение обработки (не указывать только при наличии process_result).
+            species: вид особи: "Карелина", "Ребристый".
+            project_id: проект, куда сохранить особь.
+            template_type: тип карточки: "ИК-1", "ИК-2"
+            card_data: Данные карточки от пользователя
+            process_result: Если обработка уже была совершена, то можно подгрузить данные:
+                {
+                    embedding: эмбеддинг фото
+                    crop_path: путь к вырезанному брюшку
+                    full_path: путь к полному фото
+                }
+            По умолчанию обработка совершается.
+        
+        Returns Dict[str, Any]:
+            crop_path: путь к вырезанному брюшку
+            full_path: путь к полному фото
+            success: успешность операции
+            card_id: id сохранённой карточки
+            error: сообщение об ошибке
+        """
+        result: Dict[str, Any] = {
+            'crop_path': None,
+            'full_path': None,
+            'card_id': None,
+            'success': False,
+            'error': None
+        }
+        # Обработка
+        if not process_result:
+            process_result = self.get_crop_and_embedding(image_path)
+            if process_result['error']:
+                result['error'] = process_result['error']
+                return result
         
         # Создать карточку через card_service (БЕЗ FAISS)
         # 🔥 Передаём project_id, card_service сам получит project_name если нужно
         # Внутри card_service СОХРАНЯЕТСЯ ФОТОГРАФИЯ НА ДИСКЕ
-        card_id = self.card_service.save_new_individual(
-            photo_path_cropped=crop_path,
+        save_result = self.card_service.save_new_individual(
+            photo_path_cropped=process_result['crop_path'],
+            template_type=template_type,
             species=species,
             project_id=project_id,  # 🔥 FK
             **card_data
         )
+        card_id = save_result['card_id']
+        result['card_id'] = card_id
         
         # Добавить embedding в FAISS через embedding_service
-        embedding_index = self.embedding_service.add(embedding, {
+        embedding_index = self.embedding_service.add(process_result['embedding'], {
             'card_id': card_id,
-            'photo_path': crop_path
+            'photo_path': save_result['crop_path']
         })
         self.embedding_service.commit()
         
         # Обновить photos.embedding_index в БД
-        self._update_photo_embedding_index(crop_path, embedding_index)
-        
-        # Завершить загрузку
-        self.upload_service.complete_upload(upload_id=upload['id'], card_id=card_id)
-        
-        return card_id
-    
-    def _handle_encounter(
+        self._update_photo_embedding_index(save_result['crop_path'], embedding_index)
+
+        result['success'] = True
+        result['crop_path'] = save_result['crop_path']
+        return result
+
+    def add_encounter(
         self,
-        upload: Dict[str, Any],
         prototype_id: str,
         template_type: str,
-        card_data: Dict[str, Any]
-    ) -> str:
+        species: str,
+        image_path: Optional[str] = None,
+        process_result: Optional[Dict[str, Any]] = None,
+        **card_data
+    ) -> Dict[str, Any]:
         """
-        Обработать решение MATCH (добавить встречу).
-        
+        Обработать фото и создать запись о повторной встрече в базах данных
+        (кроп + эмбеддинг + сохранение + индекс).
+        Не включает вывод кандидатов. Создаёт повторную картчоку (КВ-1/КВ-2)
+
         Args:
-            upload: Данные загрузки
-            prototype_id: ID существующей особи
-            card_data: Данные встречи
-        
-        Returns:
-            str: card_id
+            image_path (str): фото для кропа и добавления (не указывать только при наличии process_result)
+            prototype_id (str): id особи (не карточка) вида NT-K-13 (без типа карточки)
+            template_type (str): тип карточки (КВ-1/КВ-2)
+            species (str): вид особи: "Карелина", "Ребристый"
+            process_result: Если обработка уже была совершена, то можно подгрузить данные:
+                {
+                    embedding: эмбеддинг фото
+                    crop_path: путь к вырезанному брюшку
+                    full_path: путь к полному фото
+                }
+            **card_data (dict или аргументы): данные для заполнения карточки.
+
+        Returns Dict[str, Any]:
+            crop_path: путь к вырезанному брюшку
+            full_path: путь к полному фото
+            success: успешность операции
+            card_id: id сохранённой карточки
+            error: сообщение об ошибке
         """
+        result: Dict[str, Any] = {
+            'crop_path': None,
+            'full_path': None,
+            'card_id': None,
+            'success': False,
+            'error': None
+        }
+        # Обработка
+        if not process_result:
+            process_result = self.get_crop_and_embedding(image_path)
+            if process_result['error']:
+                result['error'] = process_result['error']
+                return result
+
         card_id = form_card_id(prototype_id, template_type)
-        embedding = np.array(upload['embedding'], dtype='float32')
-        crop_path = upload['file_path']
-        if not 'species' in card_data:
-            raise Exception("В card_data не указан тип особи species для добавления повторной встречи: 'Карелина', etc.")
-        species = card_data['species']
         
         # Добавить встречу через card_service (БЕЗ FAISS)
         # Внутри card_service СОХРАНЯЕТС ФОТОГРАФИЯ НА ДИСКЕ
-        self.card_service.add_encounter(
+        save_result = self.card_service.add_encounter(
             prototype_id=prototype_id,
             template_type=card_data.get('template_type', 'КВ-1'),
             species=species,
-            photo_path_cropped=crop_path,
+            photo_path_cropped=process_result['crop_path'],
             **card_data
         )
         
         # Добавить embedding в FAISS
-        embedding_index = self.embedding_service.add(embedding, {
+        embedding_index = self.embedding_service.add(process_result['embedding'], {
             'card_id': card_id,
-            'photo_path': crop_path
+            'photo_path': save_result['crop_path']
         })
         self.embedding_service.commit()
         
         # Обновить photos.embedding_index в БД
-        self._update_photo_embedding_index(crop_path, embedding_index)
-        
-        # Завершить загрузку
-        self.upload_service.complete_upload(upload_id=upload['id'], card_id=card_id)
-        
-        return card_id
+        self._update_photo_embedding_index(save_result['crop_path'], embedding_index)
+
+        result['success'] = True
+        result['crop_path'] = save_result['crop_path']
+        result['card_id'] = card_id
+        return result
     
     # ==========================================================================
     # ВНУТРЕННИЕ МЕТОДЫ

@@ -18,6 +18,11 @@ result = service.identify_and_prepare(
 
 print(result["candidates"])
 
+card_data = {
+    'length_body': 55,
+    'weight': 3.22,
+    'sex': 'М'
+}
 if result['success']:
     print(f"Upload ID: {result['upload_id']}")
     print(f"Кандидатов: {len(result['candidates'])}")
@@ -28,9 +33,9 @@ if result['success']:
     # confirm = service.confirm_decision(
     #     upload_id=result['upload_id'],
     #     decision='NEW',
-    #     card_data ={
-    #         'species': 'Карелина',
-    #         'template_type': 'ИК-1',
+    #     template_type="ИК-1",
+    #     species="Карелина",
+    #     **{
     #         'length_body': 55,
     #         'weight': 3.22,
     #         'sex': 'М'
