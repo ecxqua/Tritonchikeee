@@ -334,7 +334,7 @@ class CardService:
         result['crop_path'] = photo_path_cropped
         if not card_data:
             logger.error(f"При добавлении фотографии к карточке не вышло получить card_data")
-            reuslt["error"] = "При добавлении фотографии к карточке не вышло получить card_data"
+            result["error"] = "При добавлении фотографии к карточке не вышло получить card_data"
             return result
         try:
             cursor.execute('''

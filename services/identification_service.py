@@ -464,7 +464,7 @@ class IdentificationService:
             return result
         else:
             result['success'] = True
-            result['error'] = "Ошибка добавления фото к карточке. Возможно, карточки не существует или путь указан неверно!"
+            result['error'] = save_result['error']
             return result
         
     def add_new_individual(
