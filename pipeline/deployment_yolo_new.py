@@ -442,6 +442,7 @@ def process_single_image_sync(
     output_file: Optional[str] = None,
     trim_top_pct: float = 0.15,
     trim_bottom_pct: float = 0.3,
+    crop_name: Optional[str] = None,
     final_size: int = 244,
     seg_model_path: str = "models/best_seg.pt",
     debug: bool = False,
@@ -467,7 +468,7 @@ def process_single_image_sync(
     return loop.run_until_complete(process_single_image(
         img_path=img_path,
         output_dir=output_dir,
-        to_save=output_file,
+        crop_name=crop_name,
         trim_top_pct=trim_top_pct,
         trim_bottom_pct=trim_bottom_pct,
         final_size=final_size,

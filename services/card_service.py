@@ -89,7 +89,7 @@ def generate_card_id(
 ) -> str:
     """Генерирует ID карточки. Ищет СВОБОДНЫЙ ID."""
     prefix = SPECIES_PREFIX.get(species, 'X')
-    template_short = template_type.replace("-", " ")
+    template_short = template_type.replace("-", "")
     
     if prototype_id is None:
         prototype_id = f"NT-{prefix}-{get_next_prototype_number(cursor, species)}"
@@ -201,7 +201,7 @@ class CardService:
         photo_number: Optional[str] = None,
         is_legacy: bool = False,
         **card_data
-    ) -> str:
+    ) -> Dict[str, Any]:
         """
         Сохраняет новую особь в базу данных (основная карточка + фотографии).
 
@@ -215,7 +215,19 @@ class CardService:
             card_id: номер карточки (рекомендуется оставить пустым!)
             photo_number: номер фото (рекомендуется оставить пустым!)
             is_legacy: поле в таблице photos (рекомендуется оставить)
+        
+        Returns Dict[str, Any]:
+            crop_path: путь к вырезанному брюшку
+            success: успешность операции
+            card_id: id сохранённой карточки
+            error: сообщение об ошибке
         """
+        result = {
+            "crop_path": photo_path_cropped,
+            "card_id": card_id,
+            "success": False,
+            "error": None
+        }
         _validate_template_fields(template_type, card_data)
         
         conn = get_db_connection(self.db_path)
@@ -224,9 +236,11 @@ class CardService:
         if card_id is None:
             # Генерируем card_id с учётом template_type
             card_id = generate_card_id(cursor, species, template_type)
+            result['card_id'] = card_id
         # Сохраняем фотографию.
         if photo_path_cropped:
             photo_path_cropped = rename_photo(card_id, photo_path_cropped, suffix="cropped")
+            result['crop_path'] = photo_path_cropped
         logger.info("Сохранённый кроп: " + photo_path_cropped)
         
         if photo_number is None:
@@ -282,13 +296,72 @@ class CardService:
             conn.commit()
 
             logger.info(f"Особь сохранена: {card_id} ({template_type})")
-            return card_id
+            result['success'] = True
+            return result
         except Exception as e:
             conn.rollback()
             logger.error(f"Ошибка сохранения особи: {e}")
             raise e
         finally:
             conn.close()
+
+    def add_photo_to_card(
+        self,
+        photo_path_cropped: str,
+        card_id: str
+    ) -> Dict[str, Any]:
+        """
+        Добавляет фото к карточке по card_id.
+        
+        Returns Dict[str, Any]:
+            crop_path: путь к вырезанному брюшку
+            success: успешность операции
+            card_id: id сохранённой карточки
+            error: сообщение об ошибке
+        """
+        result = {
+            "crop_path": photo_path_cropped,
+            "card_id": card_id,
+            "success": False,
+            "error": None
+        }
+        conn = get_db_connection(self.db_path)
+        cursor = conn.cursor()
+        photo_number = _get_next_photo_number(cursor, card_id)
+        card_data = self.get_individual(card_id=card_id)
+        # Переименование файла
+        photo_path_cropped = rename_photo(card_id, photo_path_cropped, suffix="cropped")
+        result['crop_path'] = photo_path_cropped
+        if not card_data:
+            logger.error(f"При добавлении фотографии к карточке не вышло получить card_data")
+            result["error"] = "При добавлении фотографии к карточке не вышло получить card_data"
+            return result
+        try:
+            cursor.execute('''
+                INSERT INTO photos (
+                    card_id, photo_type, photo_number, photo_path,
+                    date_taken, time_taken, is_main, is_processed, embedding_index, is_legacy
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                card_id, 'cropped', photo_number, photo_path_cropped,
+                card_data.get('date', datetime.now().strftime("%d.%m.%Y")),
+                card_data.get('meeting_time'), 
+                1,
+                1,
+                -1,
+                0
+            ))
+            conn.commit()
+            logger.info(f"Фото к карточке добавлено: {photo_path_cropped} ({card_id})")
+        except Exception as e:
+            conn.rollback()
+            logger.error(f"Ошибка добавления фотографии к карточке: {e}")
+            raise e
+        finally:
+            conn.close()
+            result['card_id'] = card_id
+            result['success'] = True
+            return result
     
     def _update_photo_embedding_index(
         self, 
@@ -314,7 +387,7 @@ class CardService:
         species: str = "Карелина",
         photo_path_cropped: Optional[str] = None,
         **card_data
-    ) -> str:
+    ) -> Dict[str, Any]:
         """
         Добавляет НОВУЮ ВСТРЕЧУ (КВ-1/КВ-2) для существующей особи (карточка повторной встречи)
 
@@ -325,8 +398,20 @@ class CardService:
             photo_path_cropped (str): путь к вырезанному брюшку
             **card_data (dict или аргументы): данные для заполнения карточки.
 
-        Returns (str): номер фотографии в БД.
+        Returns Dict[str, Any]:
+            crop_path: путь к вырезанному брюшку
+            success: успешность операции
+            card_id: id сохранённой карточки
+            photo_number: номер добавленного фото
+            error: сообщение об ошибке
         """
+        result = {
+            "crop_path": photo_path_cropped,
+            "card_id": None,
+            "photo_number": None,
+            "success": False,
+            "error": None
+        }
         if template_type not in ['КВ-1', 'КВ-2']:
             raise ValueError("Для добавления встречи используйте шаблоны КВ-1 или КВ-2")
         
@@ -335,9 +420,11 @@ class CardService:
         # Правильно генерируем ID новой особи.
         # NT-K-13 -> NT-K-13-КВ1
         card_id = form_card_id(prototype_id, template_type)
+        result['card_id'] = card_id
         # Сохраняем фотографию
         if photo_path_cropped:
             photo_path_cropped = rename_photo(card_id, photo_path_cropped, suffix="cropped")
+            result['crop_path'] = photo_path_cropped
 
         conn = get_db_connection(self.db_path)
         cursor = conn.cursor()
@@ -376,7 +463,9 @@ class CardService:
             conn.commit()
             
             logger.info(f"Встреча {template_type} добавлена к особи {card_id}")
-            return photo_number
+            result['photo_number'] = photo_number
+            result['success'] = True
+            return result
         except sqlite3.IntegrityError as e:
             conn.rollback()
             logger.error(f"Ошибка указания ID. Возможно, запись с таким ID уже есть!")
