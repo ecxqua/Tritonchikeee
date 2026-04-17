@@ -463,7 +463,6 @@ class IdentificationService:
             result['crop_path'] = save_result['crop_path']
             return result
         else:
-            result['success'] = True
             result['error'] = save_result['error']
             return result
         
