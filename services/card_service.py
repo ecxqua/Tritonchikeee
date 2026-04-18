@@ -191,7 +191,7 @@ class CardService:
     # CREATE
     # -------------------------------------------------------------------------
     
-    def save_new_individual(
+    def _save_new_individual(
         self,
         photo_path_cropped: Optional[str],
         species: str = "Карелина",
@@ -219,12 +219,14 @@ class CardService:
         Returns Dict[str, Any]:
             crop_path: путь к вырезанному брюшку
             success: успешность операции
+            photo_id: id сохранённой фотографии в photos
             card_id: id сохранённой карточки
             error: сообщение об ошибке
         """
         result = {
             "crop_path": photo_path_cropped,
             "card_id": card_id,
+            "photo_id": None,
             "success": False,
             "error": None
         }
@@ -292,6 +294,8 @@ class CardService:
                     -1,
                     1 if is_legacy else 0
                 ))
+                # Сохраняем photo_id
+                result['photo_id'] = cursor.lastrowid
             
             conn.commit()
 
@@ -305,7 +309,7 @@ class CardService:
         finally:
             conn.close()
 
-    def add_photo_to_card(
+    def _add_photo_to_card(
         self,
         photo_path_cropped: str,
         card_id: str
@@ -317,18 +321,20 @@ class CardService:
             crop_path: путь к вырезанному брюшку
             success: успешность операции
             card_id: id сохранённой карточки
+            photo_id: id добавленного фото в photos
             error: сообщение об ошибке
         """
         result = {
             "crop_path": photo_path_cropped,
             "card_id": card_id,
+            "photo_id": None,
             "success": False,
             "error": None
         }
         conn = get_db_connection(self.db_path)
         cursor = conn.cursor()
         photo_number = _get_next_photo_number(cursor, card_id)
-        card_data = self.get_individual(card_id=card_id)
+        card_data = self.get_card(card_id=card_id)
         # Переименование файла
         photo_path_cropped = rename_photo(card_id, photo_path_cropped, suffix="cropped")
         result['crop_path'] = photo_path_cropped
@@ -351,6 +357,8 @@ class CardService:
                 -1,
                 0
             ))
+            # Сохраняем photo_id
+            result['photo_id'] = cursor.lastrowid
             conn.commit()
             logger.info(f"Фото к карточке добавлено: {photo_path_cropped} ({card_id})")
         except Exception as e:
@@ -380,7 +388,7 @@ class CardService:
     # UPDATE
     # -------------------------------------------------------------------------
     
-    def add_encounter(
+    def _add_encounter(
         self,
         prototype_id: str,
         template_type: str,
@@ -402,13 +410,15 @@ class CardService:
             crop_path: путь к вырезанному брюшку
             success: успешность операции
             card_id: id сохранённой карточки
-            photo_number: номер добавленного фото
+            photo_number: номер добавленного фото среди фото карточки
+            photo_id: id добавленного фото в photos
             error: сообщение об ошибке
         """
         result = {
             "crop_path": photo_path_cropped,
             "card_id": None,
             "photo_number": None,
+            "photo_id": None,
             "success": False,
             "error": None
         }
@@ -459,7 +469,8 @@ class CardService:
                     INSERT INTO photos (card_id, photo_type, photo_number, photo_path, date_taken, is_main, is_processed, embedding_index, is_legacy)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ''', (card_id, 'cropped', photo_number, photo_path_cropped, card_data.get('date'), 0, 1, -1, 0))
-            
+                # Сохраняем photo_id
+                result['photo_id'] = cursor.lastrowid
             conn.commit()
             
             logger.info(f"Встреча {template_type} добавлена к особи {card_id}")
@@ -477,7 +488,7 @@ class CardService:
         finally:
             conn.close()
     
-    def update_individual(self, card_id: str, **kwargs) -> bool:
+    def _update_card(self, card_id: str, **kwargs) -> bool:
         """Обновляет данные существующей карточки."""
         if not kwargs:
             logger.warning("Нет полей для обновления")
@@ -501,14 +512,38 @@ class CardService:
     # DELETE
     # -------------------------------------------------------------------------
     
-    def delete_individual(self, card_id: str, delete_photos: bool = True, confirm: bool = False) -> bool:
-        """Полностью удаляет карточку и все её фото (hard delete)."""
+    def _delete_card(
+            self,
+            card_id: str,
+            delete_photos: bool = True,
+            confirm: bool = False
+        ) -> Dict[str, Any]:
+        """
+        Полностью удаляет карточку и все её фото (hard delete).
+
+        Args:
+            card_id (str): id карточки вида NT-K-1-ИК1
+            delete_photos (bool): удалить фото (по умолчанию True)
+            confirm (bool): обязательное подтверждение удаления
+
+        Returns:
+            Dict:
+                - success: bool
+                - error: str
+                - photo_ids: list[int]
+        """
+        result = {
+            "success": False,
+            "error": None,
+            "photo_ids": list()
+        }
         if not confirm:
-            raise ValueError(
+            result['error'] = str(
                 f"ТРЕБУЕТСЯ ПОДТВЕРЖДЕНИЕ!\n"
                 f"Вы уверены, что хотите удалить {card_id}?\n"
                 f"Передайте confirm=True для подтверждения."
             )
+            return result
         
         conn = get_db_connection(self.db_path)
         cursor = conn.cursor()
@@ -516,10 +551,15 @@ class CardService:
         try:
             cursor.execute('SELECT card_id FROM cards WHERE card_id = ?', (card_id,))
             if not cursor.fetchone():
-                raise ValueError(f"Особь {card_id} не найдена в базе.")
+                result['error'] = f"Особь {card_id} не найдена в базе."
+                return result
             
             photo_paths = []
             if delete_photos:
+                # 1. Получаем photo_id ДО удаления (важно сохранить перед очисткой)
+                cursor.execute('SELECT photo_id FROM photos WHERE card_id = ?', (card_id,))
+                result['photo_ids'] = [row['photo_id'] for row in cursor.fetchall()]
+
                 cursor.execute('SELECT photo_path FROM photos WHERE card_id = ?', (card_id,))
                 photo_paths = [row['photo_path'] for row in cursor.fetchall()]
                 cursor.execute('DELETE FROM photos WHERE card_id = ?', (card_id,))
@@ -534,23 +574,77 @@ class CardService:
                         Path(photo_path).unlink()
                         logger.info(f"Удалён файл: {photo_path}")
                     except FileNotFoundError:
-                        pass
+                        # Не смогли удалить файл, но всё равно выполняем операции
+                        result['error'] = result['error'] + f"Файл {photo_path} не был найден\n"
             
-            logger.info(f"Особь {card_id} удалена")
-            return True
+            logger.info(f"Карточка {card_id} удалена")
+            result['success'] = True
+            return result
             
         except Exception as e:
             conn.rollback()
-            logger.error(f"Ошибка удаления особи: {e}")
+            logger.error(f"Ошибка удаления карточк: {e}")
             raise e
         finally:
             conn.close()
-    
+
+    def _delete_photo(
+        self,
+        photo_id: int,
+        delete_file: bool = True
+    ):
+        """
+        Удаляет фото, привязанное к карточке.
+
+        Args:
+            photo_id (str): id фото из таблицы photos, можно получить по card_service.get_card_photos()
+            delete_file (bool): удалить файл, связанный с записью о фото (по умолчанию True)
+
+        Returns:
+            Dict:
+                - success: bool
+                - error:
+        """
+        result = {
+            "success": False,
+            "error": None
+        }
+        conn = get_db_connection(self.db_path)
+        cursor = conn.cursor()
+        
+        try:
+            # Удаление из таблицы
+            cursor.execute('SELECT photo_path FROM photos WHERE photo_id = ?', (photo_id,))
+            row = cursor.fetchone()
+            photo_path = str()
+            if row:
+                photo_path = str(row['photo_path'])
+            cursor.execute('DELETE FROM photos WHERE photo_id = ?', (photo_id,))
+            conn.commit()
+
+            # Удаление файла
+            if delete_file and photo_path:
+                try:
+                    Path(photo_path).unlink()
+                    logger.info(f"Удалён файл: {photo_path}")
+                except FileNotFoundError:
+                    # Не смогли удалить файл, но всё равно выполняем операции
+                    result['error'] = f"Файл {photo_path} не был найден\n"
+            
+            result['success'] = True
+            return result
+        except Exception as e:
+            conn.rollback()
+            logger.error(f"Ошибка удаления фото: {e}")
+            raise e
+        finally:
+            conn.close()
+
     # -------------------------------------------------------------------------
     # READ
     # -------------------------------------------------------------------------
     
-    def get_individual_photos(self, card_id: str) -> List[Dict[str, Any]]:
+    def get_card_photos(self, card_id: str) -> List[Dict[str, Any]]:
         """Получает все фотографии карточки из базы данных."""
         conn = get_db_connection(self.db_path)
         cursor = conn.cursor()
@@ -568,7 +662,7 @@ class CardService:
         
         return photos
     
-    def get_individual(self, card_id: str) -> Optional[Dict[str, Any]]:
+    def get_card(self, card_id: str) -> Optional[Dict[str, Any]]:
         """Получает данные карточки по ID (с информацией о проекте)."""
         conn = get_db_connection(self.db_path)
         cursor = conn.cursor()

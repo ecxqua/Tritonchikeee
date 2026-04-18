@@ -10,7 +10,7 @@ start_time = time.time()
 
 # 2. Шаг 1: Анализ
 result = service.identify_and_prepare(
-    image_path="data/input/image_.jpg",
+    image_path="data/input/image.png",
     project_id=1,
     top_k=5,
     debug=True

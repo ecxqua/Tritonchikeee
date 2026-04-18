@@ -408,9 +408,7 @@ class IdentificationService:
         return result
 
     # ==========================================================================
-    # Входы для внесения карточек о новой особи и повторной встречи.
-    # Объединение и управление card_service.py, upload_service.py
-    # и embedding_service.py
+    # CREATE
     # ==========================================================================
 
     def add_photo_to_card(
@@ -439,11 +437,13 @@ class IdentificationService:
         
         Returns Dict[str, Any]:
             crop_path: путь к вырезанному брюшку
+            photo_id: id добавленного фото в photos
             success: успешность операции
             error: сообщение об ошибке
         """
         result: Dict[str, Any] = {
             'crop_path': None,
+            'photo_id': None,
             'success': False,
             'error': None
         }
@@ -457,14 +457,18 @@ class IdentificationService:
         result['card_id'] = card_id
         
         # Добавление фото в БД
-        save_result = self.card_service.add_photo_to_card(process_result['crop_path'], card_id=card_id)
+        save_result = self.card_service._add_photo_to_card(process_result['crop_path'], card_id=card_id)
         
         if save_result['success']:
             # Добавить embedding в FAISS через embedding_service
-            embedding_index = self.embedding_service.add(process_result['embedding'], {
-                'card_id': card_id,
-                'photo_path': save_result['crop_path']
-            })
+            embedding_index = self.embedding_service.add(
+                process_result['embedding'],
+                {
+                    'card_id': card_id,
+                    'photo_path': save_result['crop_path'],
+                },
+                photo_id=save_result['photo_id']
+            )
             self.embedding_service.commit()
             
             # Обновить photos.embedding_index в БД
@@ -532,7 +536,7 @@ class IdentificationService:
         # Создать карточку через card_service (БЕЗ FAISS)
         # 🔥 Передаём project_id, card_service сам получит project_name если нужно
         # Внутри card_service СОХРАНЯЕТСЯ ФОТОГРАФИЯ НА ДИСКЕ
-        save_result = self.card_service.save_new_individual(
+        save_result = self.card_service._save_new_individual(
             photo_path_cropped=process_result['crop_path'],
             template_type=template_type,
             species=species,
@@ -543,10 +547,14 @@ class IdentificationService:
         result['card_id'] = card_id
         
         # Добавить embedding в FAISS через embedding_service
-        embedding_index = self.embedding_service.add(process_result['embedding'], {
+        embedding_index = self.embedding_service.add(
+            process_result['embedding'],
+            {
             'card_id': card_id,
             'photo_path': save_result['crop_path']
-        })
+            },
+            photo_id=save_result['photo_id']
+        )
         self.embedding_service.commit()
         
         # Обновить photos.embedding_index в БД
@@ -608,7 +616,7 @@ class IdentificationService:
         
         # Добавить встречу через card_service (БЕЗ FAISS)
         # Внутри card_service СОХРАНЯЕТС ФОТОГРАФИЯ НА ДИСКЕ
-        save_result = self.card_service.add_encounter(
+        save_result = self.card_service._add_encounter(
             prototype_id=prototype_id,
             template_type=card_data.get('template_type', 'КВ-1'),
             species=species,
@@ -617,10 +625,14 @@ class IdentificationService:
         )
         
         # Добавить embedding в FAISS
-        embedding_index = self.embedding_service.add(process_result['embedding'], {
+        embedding_index = self.embedding_service.add(
+            process_result['embedding'],
+            {
             'card_id': card_id,
             'photo_path': save_result['crop_path']
-        })
+            },
+            photo_id=save_result['photo_id']
+        )
         self.embedding_service.commit()
         
         # Обновить photos.embedding_index в БД
@@ -630,7 +642,166 @@ class IdentificationService:
         result['crop_path'] = save_result['crop_path']
         result['card_id'] = card_id
         return result
-    
+
+    # ==========================================================================
+    # DELETE
+    # ==========================================================================
+
+    def delete_card(
+        self,
+        card_id: str,
+        delete_photos: bool = True,
+        confirm: bool = False
+    ):
+        """Удалить карточку особи (не все карточки особи, а конкретную) (+ FAISS)
+
+        Args:
+            card_id (str): id карточки вида NT-K-1-ИК1
+            delete_photos (bool): удалить фото (по умолчанию True)
+            confirm (bool): обязательное подтверждение удаления
+
+        Returns:
+            Dict:
+                - success: bool
+                - error: str
+        """
+        result = {
+            "success": False,
+            "error": None
+        }
+        if confirm:
+            delete_result = self.card_service._delete_card(
+                card_id=card_id,
+                delete_photos=delete_photos,
+                confirm=confirm
+            )
+            
+            if not delete_result['success']:
+                result['error'] = delete_result['error']
+                return result
+
+            # Удаляем все связанные фото в photos из FAISS
+            for photo_id in delete_result['photo_ids']:
+                if self.embedding_service.delete(photo_id=photo_id):
+                    self.embedding_service.commit()
+                else:
+                    result['error'] = "Ошибка удаления из FAISS. Вектор не найден"
+                    return result
+
+            result['success'] = True
+            return result
+        else:
+            result['error'] = "Необходимо подтверждение операции"
+            return result
+
+    def delete_prototype(
+        self,
+        prototype_id: str,
+        confirm: bool = False
+    ):
+        """Удалить особь со всеми карточками и фотографиями (+ FAISS)
+
+        Args:
+            prototype_id (str): id особи вида NT-K-25 (без уточнения типа карточки)
+            confirm (bool): обязательное подтверждение удаления
+
+        Returns:
+            Dict:
+                - success: bool
+                - error: str
+        """
+        result = {
+            "success": False,
+            "error": None
+        }
+        if confirm:
+            card_ids = self.card_service.get_matching_card_ids(prototype_id=prototype_id)
+            for card_id in card_ids:
+                delete_result = self.delete_card(
+                    card_id=card_id,
+                    delete_photos=True,
+                    confirm=confirm
+                )
+                if not delete_result['success']:
+                    result['error'] = delete_result['error']
+                    return result
+
+            logger.info(f"Особь {prototype_id} удалена")
+            logger.info(f"Удалённые карточки особи: {card_ids}")
+            result['success'] = True
+            return result
+        else:
+            result['error'] = "Необходимо подтверждение операции"
+            return result
+
+    def delete_photo(
+        self,
+        photo_id: int,
+        delete_file: bool = True
+    ):
+        """
+        Удаляет фото, привязанное к карточке (+ удаление эмбеддинга).
+
+        Args:
+            photo_id (str): id фото из таблицы photos, можно получить по card_service.get_card_photos()
+            delete_file (bool): удалить файл, связанный с записью о фото (по умолчанию True)
+
+        Returns:
+            Dict:
+                - success: bool
+                - error:
+        """
+        result = {
+            "success": False,
+            "error": None
+        }
+
+        delete_result = self.card_service._delete_photo(
+            photo_id=photo_id,
+            delete_file=delete_file
+        )
+        # Удаление фото из FAISS
+        if self.embedding_service.delete(photo_id=photo_id):
+            self.embedding_service.commit()
+        else:
+            result['error'] = "Ошибка удаления из FAISS. Вектор не найден"
+            return result
+
+        result['success'] = True
+        return result
+
+    # ==========================================================================
+    # UPDATE
+    # ==========================================================================
+    def update_card(self, card_id: str, **card_data) -> Dict[str, Any]:
+        """Обновляет данные существующей карточки
+
+        Args:
+            card_id (str): id карточки, которую нужно изменить (у одной особи много карточек)
+            **kwargs: словарь с полями для изменения
+
+        Returns:
+            Dict:
+                - success: bool
+                - error:
+        """
+        result = {
+            "success": False,
+            "error": None
+        }
+
+        update_result = self.card_service._update_card(
+            card_id=card_id,
+            **card_data
+        )
+        # Удаление фото из FAISS
+        if update_result:
+            result['success'] = True
+            return result
+        else:
+            result['error'] = "Не удалось обновить карточку особи"
+            return result
+
     # ==========================================================================
     # ВНУТРЕННИЕ МЕТОДЫ
     # Многие из них выенесены сюда, потому что они не совсем имеют место
@@ -681,7 +852,7 @@ class IdentificationService:
         prototype_ids = []
         prototype_embeddings = []
         metadata = {}
-        
+
         for proto in all_prototypes:
             proto_id = proto['prototype_id']
             
@@ -703,7 +874,7 @@ class IdentificationService:
                 emb = self.embedding_service.get_embedding_by_index(idx)
                 if emb is not None:
                     embeddings_list.append(emb)
-                    
+
             if not embeddings_list:
                 continue
                 
