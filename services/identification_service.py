@@ -351,6 +351,17 @@ class IdentificationService:
             trim_bottom_pct=self.config.get('seg-model', {}).get('trim_bottom_pct', 0.3),
             final_size=self.config.get('seg-model', {}).get('final_size', 244),
             seg_model_path=self.config.get('seg-model', {}).get('path', 'models/best_seg.pt'),
+            pose_align_enabled=self.config.get('seg-model', {}).get('pose_align_enabled', False),
+            pose_model_path=self.config.get('seg-model', {}).get('pose_model_path', 'models/best_pose.pt'),
+            pose_head_kpt_index=self.config.get('seg-model', {}).get('pose_head_kpt_index', 0),
+            pose_tail_kpt_index=self.config.get('seg-model', {}).get('pose_tail_kpt_index', 1),
+            pose_min_kpt_conf=self.config.get('seg-model', {}).get('pose_min_kpt_conf', 0.25),
+            pose_rotation_mode=self.config.get('seg-model', {}).get('pose_rotation_mode', 'flip-only'),
+            pose_flip_vertical_ratio=self.config.get('seg-model', {}).get('pose_flip_vertical_ratio', 1.15),
+            pose_upright_skip_threshold_deg=self.config.get('seg-model', {}).get('pose_upright_skip_threshold_deg', 20.0),
+            pose_min_rotation_deg=self.config.get('seg-model', {}).get('pose_min_rotation_deg', 5.0),
+            pose_swap_penalty_deg=self.config.get('seg-model', {}).get('pose_swap_penalty_deg', 35.0),
+            pose_rotation_direction=self.config.get('seg-model', {}).get('pose_rotation_direction', 1.0),
             debug=debug,
             return_array=True
         )
