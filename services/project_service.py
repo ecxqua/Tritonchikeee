@@ -187,14 +187,14 @@ class ProjectService:
         try:
             if active_only:
                 cursor.execute('''
-                    SELECT id, name, description, created_at
+                    SELECT id, name, description, created_at, species_filter, territory_filter
                     FROM projects
                     WHERE is_active = 1
                     ORDER BY name
                 ''')
             else:
                 cursor.execute('''
-                    SELECT id, name, description, is_active, created_at
+                    SELECT id, name, description, is_active, created_at, species_filter, territory_filter
                     FROM projects
                     ORDER BY name
                 ''')
