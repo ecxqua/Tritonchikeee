@@ -33,5 +33,19 @@ def create_project(
 def fetch_projects(
     id_service: IdentificationService,      
 ) -> List[Dict[str, Any]]:
-    proj = id_service.project_service.list_projects()
+    cards = id_service.card_service
+
+    projects = id_service.project_service.list_projects()
+    return [
+        {
+            "id": pr["id"],
+            "name": pr["name"],
+            "description": pr["description"],
+            "species": pr["species_filter"],
+            "territory": pr["territory_filter"],
+            "createdAt": pr["created_at"],
+            "newtCount": len(cards.get_prototypes_by_project(pr["id"]))
+        }
+        for pr in projects
+    ]
     # id_service.card_service.get_prototypes_by_project
