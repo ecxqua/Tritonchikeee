@@ -261,6 +261,7 @@ def build_faiss_index():
             
             # Промежуточное сохранение индекса каждые 5 батчей (на случай краха)
             if (i // BATCH_SIZE) % 5 == 0 and i > 0:
+                Path(FAISS_INDEX_PATH).parent.mkdir(parents=True, exist_ok=True)
                 faiss.write_index(faiss_index, str(FAISS_INDEX_PATH))
                 print(f"   💾 Промежуточное сохранение индекса: {faiss_index.ntotal} векторов")
     
