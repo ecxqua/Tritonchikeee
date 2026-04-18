@@ -31,6 +31,8 @@ bot/conservation/*.jpg
 bot/conservation/*.jpeg
 bot/conservation/*.png
 data/dataset_crop/database_embeddings.pkl
+data/embeddings/
+data/output_old/
 /models/
 data/input/
 data/output/
