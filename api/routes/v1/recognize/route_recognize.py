@@ -2,7 +2,7 @@ from fastapi import APIRouter, UploadFile, File, Depends, Form
 from fastapi.concurrency import run_in_threadpool
 
 from api.dependencies import get_id_service, get_temp
-from api.routes.v1.analyse import service
+from api.routes.v1.recognize import service
 from api.models import FileData
 
 from pathlib import Path
@@ -11,8 +11,8 @@ from pathlib import Path
 router = APIRouter()
 
 
-@router.post("/analyse")
-async def analyse(
+@router.post("/recognize")
+async def recognize(
     photo: UploadFile = File(...),  # multipart/form-data request
     scope: str = Form(...),
     projectId: int | None = Form(...),
@@ -35,7 +35,7 @@ async def analyse(
     # use a threadpool and multiple uvicorn workers instead
     # e.g. `uvicorn <entrypoint> --workers 4`
     return await run_in_threadpool(
-        service.complete_analyse,
+        service.complete_recognize,
         file_data,
         scope,
         projectId,
