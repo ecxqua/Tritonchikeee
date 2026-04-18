@@ -82,34 +82,6 @@ card_service = service.project_service
 # Криво я знаю Т_Т
 ```
 
-### Обновление существующей карточки
-
-`**kwargs`: заполнение полей для обновления
-
-`card_id`: id карточки (NT-K-1-КВ1, `prototype_id`-`template_type`)
-```python
-result: bool = card_service.update_individual(
-    card_id: str,
-    **kwargs
-)
-```
-
-### Удаление карточки
-
-`card_id`: id карточки (NT-K-1-КВ1, `prototype_id`-`template_type`)
-
-`delete_photos`: удалять фото, связанные с карточкой?
-
-`confirm`: подтверждение операции
-
-```python
-result: bool = card_service.delete_individual(
-    card_id: str,
-    delete_photos: bool = True,
-    confirm: bool = False
-)
-```
-
 ### Получение всех особей (не карточек) в базе
 
 Возвращает список всех прототипов (биологических особей) во всей базе данных. Группирует карточки по prototype_id. Проверяет глобальную целостность архитектуры.
@@ -196,6 +168,55 @@ Returns Dict[str, Any]:
     crop_path: путь к вырезанному брюшку
     success: успешность операции
     error: сообщение об ошибке
+```
+### ВАЖНО! Для UPDATE используйте только методы из indentification_service
+### Обновление существующей карточки
+
+`**kwargs`: заполнение полей для обновления
+
+`card_id`: id карточки (NT-K-1-КВ1, `prototype_id`-`template_type`)
+```python
+result = service.update_card(
+    card_id="NT-R-9-ИК1"
+    **{"weight": 1}
+)
+```
+
+### ВАЖНО! Для DELETE используйте только методы из indentification_service
+### Удаление карточки
+
+`card_id`: id карточки (NT-K-1-КВ1, `prototype_id`-`template_type`)
+
+`delete_photos`: удалять фото, связанные с карточкой (по умолчанию True, рекомендую оставить)
+
+`confirm`: подтверждение операции
+
+```python
+result = service.delete_card(
+    card_id="NT-K-88-ИК1",
+    confirm=True
+)
+```
+
+### Удаление особи (всех карточек особи)
+`card_id`: id особи (NT-K-1)
+
+`confirm`: подтверждение операции
+```python
+result = service.delete_prototype(
+    prototype_id="NT-K-2",
+    confirm=True
+)
+```
+
+### Удаление фотографии, привязнной к карточке
+`photo_id`: id фото в таблице photos, можно получить GET методами (см. в card_service)
+
+`delete_file`: удалить файл фотографии (в файловой системе) (по умолчанию True)
+```python
+result = service.delete_photo(
+    photo_id=610
+)
 ```
 
 Больше методов в `services/card_service.py`
