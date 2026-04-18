@@ -8,6 +8,8 @@ from typing import Any, Dict
 
 def complete_analyse(
     file_data: FileData,
+    scope: str,
+    projectId: int | None,
     id_service: IdentificationService,
     temp: TempStorage
 ) -> Dict[str, Any]:

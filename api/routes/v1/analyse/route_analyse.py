@@ -1,4 +1,4 @@
-from fastapi import APIRouter, UploadFile, File, Depends
+from fastapi import APIRouter, UploadFile, File, Depends, Form
 from fastapi.concurrency import run_in_threadpool
 
 from api.dependencies import get_id_service, get_temp
@@ -13,15 +13,17 @@ router = APIRouter()
 
 @router.post("/analyse")
 async def analyse(
-    file: UploadFile = File(...),  # multipart/form-data request
+    photo: UploadFile = File(...),  # multipart/form-data request
+    scope: str = Form(...),
+    projectId: int | None = Form(...),
     id_service=Depends(get_id_service),
     temp=Depends(get_temp)
 ):
     if file.content_type not in ["image/png", "image/jpeg"]:
         return {"error": "Invalid file type"}
 
-    contents = await file.read()
-    original_name = Path(file.filename)
+    contents = await photo.read()
+    original_name = Path(photo.filename)
 
     file_data = FileData(
         name=original_name.stem,
@@ -35,6 +37,8 @@ async def analyse(
     return await run_in_threadpool(
         service.complete_analyse,
         file_data,
+        scope,
+        projectId,
         id_service,
         temp
     )

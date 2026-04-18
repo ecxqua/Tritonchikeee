@@ -40,9 +40,9 @@ def add_new_card(
         begin_with=f".{file_name}",
         end_with=".CROP"
     )
-
+"""
     try:
-        id_service.get_crop(
+        id_service.get_crop_and_embedding(
             image_path=str(path),
             output_file=str(crop_output),
             crop_name=file_name,
@@ -62,3 +62,4 @@ def add_new_card(
         return {"card_id": id}
     except Exception as ex:
         raise APIError(msg=str(ex), status=500)
+"""
