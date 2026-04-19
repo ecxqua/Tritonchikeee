@@ -203,7 +203,32 @@ class ProjectService:
             
         finally:
             conn.close()
-    
+
+    def get_unique_filters(self) -> Dict[str, List[str]]:
+        """
+        Возвращает уникальные значения territory_filter и species_filter.
+        """
+        conn = get_db_connection(self.db_path)
+        cursor = conn.cursor()
+        try:
+            cursor.execute('''
+                SELECT DISTINCT territory_filter 
+                FROM projects 
+                WHERE territory_filter IS NOT NULL AND territory_filter != ''
+            ''')
+            territories = [row[0] for row in cursor.fetchall()]
+
+            cursor.execute('''
+                SELECT DISTINCT species_filter 
+                FROM projects 
+                WHERE species_filter IS NOT NULL AND species_filter != ''
+            ''')
+            species = [row[0] for row in cursor.fetchall()]
+
+            return {"species": species, "territories": territories}
+        finally:
+            conn.close()
+
     def update_project(
         self,
         project_id: int,
