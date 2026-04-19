@@ -94,7 +94,6 @@ class UploadService:
     
     def create_upload(
         self,
-        project_id: int,
         file_path: str,
         embedding: Any,
         expiry_hours: int = UPLOAD_EXPIRY_HOURS
@@ -123,7 +122,7 @@ class UploadService:
             cursor.execute('''
                 INSERT INTO uploads (project_id, file_path, embedding, status, created_at, expires_at)
                 VALUES (?, ?, ?, 'pending', ?, ?)
-            ''', (project_id, file_path, embedding_json, now.isoformat(), expires_at.isoformat()))
+            ''', (-1, file_path, embedding_json, now.isoformat(), expires_at.isoformat()))
             
             upload_id = cursor.lastrowid
             conn.commit()

@@ -112,7 +112,7 @@ class IdentificationService:
     def identify_and_prepare(
         self,
         image_path: str,
-        project_id: int,
+        project_ids: Optional[list[int]] = None,
         top_k: int = 20,
         debug: bool = False
     ) -> Dict[str, Any]:
@@ -152,10 +152,10 @@ class IdentificationService:
         }
         
         try:
-            # Валидация проекта
-            project = self.project_service.get_project_by_id(project_id)
-            if not project:
-                raise ValueError(f"Проект с ID={project_id} не найден")
+            # # Валидация проекта
+            # project = self.project_service.get_project_by_id(project_id)
+            # if not project:
+            #     raise ValueError(f"Проект с ID={project_id} не найден")
 
             # Обработка
             process_result = self.get_crop_and_embedding(image_path, debug)
@@ -168,10 +168,9 @@ class IdentificationService:
             result['full_path'] = process_result['crop_path']
             
             # === 3. СОЗДАНИЕ ВРЕМЕННОЙ ЗАГРУЗКИ ===
-            logger.info(f"Создание загрузки (проект ID={project_id})")
+            logger.info(f"Создание загрузки")
             
             upload_id = self.upload_service.create_upload(
-                project_id=project_id,  # 🔥 FK, валидация внутри upload_service
                 file_path=process_result['crop_path'],
                 embedding=process_result['embedding'],
                 expiry_hours=self.config.get('db', {}).get('expiry_hours', 24)
@@ -180,9 +179,9 @@ class IdentificationService:
             result['upload_id'] = upload_id
             
             # === 4. ПОИСК ПОХОЖИХ (по прототипам, фильтр по project_id) ===
-            logger.info(f"Поиск похожих (top_k={top_k}, project_id={project_id})")
+            logger.info(f"Поиск похожих (top_k={top_k}, project_ids={project_ids})")
             
-            prototypes = self._load_prototypes(project_id)
+            prototypes = self._load_prototypes(project_ids)
             
             candidates = []
             if prototypes['prototype_ids']:
@@ -213,6 +212,7 @@ class IdentificationService:
         self,
         upload_id: int,
         decision: str,
+        project_id: Optional[int] = None,
         species: Optional[str] = "Карелина",
         prototype_id: Optional[str] = None,
         template_type: Optional[str] = None,
@@ -224,8 +224,9 @@ class IdentificationService:
         Args:
             upload_id: ID временной загрузки (из identify_and_prepare)
             decision: Решение пользователя ('NEW', 'MATCH', 'CANCEL')
+            project_id: Проект, куда сохранить тритона ('NEW')
             species: вид тритона: "Карелина", "Ребристый" (для NEW, MATCH)
-            card_data: Данные карточки (для NEW)
+            card_data: Данные карточки (для NEW и MATCH)
             prototype_id: ID существующей особи (для MATCH)
             template_type: тип шаблона для карточки (для NEW, MATCH)
         
@@ -261,7 +262,7 @@ class IdentificationService:
                 # === НОВАЯ ОСОБЬ ===
                 add_result = self.add_new_individual(
                     species=species,
-                    project_id=upload['project_id'],
+                    project_id=project_id,
                     template_type=template_type,
                     process_result=process_result,
                     **card_data
@@ -821,14 +822,16 @@ class IdentificationService:
         conn.commit()
         conn.close()
     
-    def _load_prototypes(self, project_id: Optional[int] = None) -> Dict[str, Any]:
+    def _load_prototypes(self, project_ids: Optional[list[int]] = None) -> Dict[str, Any]:
         """
         Загрузить прототипы особей (средние эмбеддинги) из БД + FAISS.
         Группировка и усреднение — по биологической особи (прототипу), не по карточке.
         """
         # 1. Определяем список проектов для итерации
-        if project_id is not None:
-            projects_to_process = [{'id': project_id, 'name': f'Project_{project_id}'}]
+        if project_ids is not None:
+            projects_to_process: list[dict] = list()
+            for project_id in project_ids:
+                projects_to_process.append({'id': project_id})
         else:
             # list_projects возвращает List[Dict] с ключами: id, name, description, created_at...
             projects_to_process = self.project_service.list_projects(active_only=False)

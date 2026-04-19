@@ -11,18 +11,13 @@ start_time = time.time()
 # 2. Шаг 1: Анализ
 result = service.identify_and_prepare(
     image_path="data/input/image.png",
-    project_id=1,
+    project_ids=[2],
     top_k=5,
     debug=True
 )
 
 print(result["candidates"])
 
-card_data = {
-    'length_body': 55,
-    'weight': 3.22,
-    'sex': 'М'
-}
 if result['success']:
     print(f"Upload ID: {result['upload_id']}")
     print(f"Кандидатов: {len(result['candidates'])}")

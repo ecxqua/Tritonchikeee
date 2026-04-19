@@ -8,7 +8,7 @@ service = create_identification_service()
 print(service.add_new_individual(
     species="Карелина",
     image_path="data/input/image.png",
-    project_id=1,
+    project_id=2,
     template_type="ИК-1",
     **{
         'length_body': 55,
