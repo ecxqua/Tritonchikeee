@@ -207,6 +207,9 @@ class ProjectService:
     def get_unique_filters(self) -> Dict[str, List[str]]:
         """
         Возвращает уникальные значения territory_filter и species_filter.
+
+        Returns:
+            Dict[str, List[str]]: {"species": [], "territories": []}
         """
         conn = get_db_connection(self.db_path)
         cursor = conn.cursor()
