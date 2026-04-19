@@ -93,8 +93,8 @@ class ProjectService:
             ''', (
                 name,
                 description,
-                json.dumps(species_filter) if species_filter else None,
-                json.dumps(territory_filter) if territory_filter else None,
+                json.dumps(species_filter, ensure_ascii=False) if species_filter else None,
+                json.dumps(territory_filter, ensure_ascii=False) if territory_filter else None,
                 datetime.now().isoformat()
             ))
             
@@ -171,7 +171,10 @@ class ProjectService:
         finally:
             conn.close()
     
-    def list_projects(self, active_only: bool = True) -> List[Dict[str, Any]]:
+    def list_projects(
+            self,
+            active_only: bool = True
+        ) -> List[Dict[str, Any]]:
         """
         Получить список всех проектов.
         
@@ -199,6 +202,77 @@ class ProjectService:
                     ORDER BY name
                 ''')
             
+            return [dict(row) for row in cursor.fetchall()]
+            
+        finally:
+            conn.close()
+
+    def search_projects(
+        self,
+        name: Optional[str] = None,
+        species: Optional[str] = None,
+        territory: Optional[str] = None,
+        is_active: Optional[bool] = None,
+        limit: int = 50,
+        offset: int = 0
+    ) -> List[Dict[str, Any]]:
+        """
+        Поиск проектов с опциональными фильтрами.
+        
+        Args:
+            name: Частичное совпадение по названию
+            species: Вхождение вида в JSON-массив species_filter
+            territory: Вхождение территории в JSON-массив territory_filter
+            is_active: Статус активности (True/False/None)
+            created_after: Дата в формате ISO (YYYY-MM-DDTHH:MM:SS)
+            limit/offset: Пагинация
+            
+        Returns:
+            List[dict]: Список найденных проектов
+        """
+        import json
+        
+        conn = get_db_connection(self.db_path)
+        cursor = conn.cursor()
+        
+        try:
+            # Базовый запрос
+            query = '''
+                SELECT id, name, description, species_filter, territory_filter, 
+                       created_at, updated_at, is_active
+                FROM projects
+            '''
+            clauses = []
+            params = []
+            
+            # Динамическое добавление условий
+            if name is not None:
+                clauses.append("name LIKE ?")
+                params.append(f"%{name}%")
+                
+            if species is not None:
+                # Работает для JSON-строк вроде ["Карелина", "Гребенчатый"]
+                clauses.append("species_filter LIKE ?")
+                params.append(f"%\"{species}\"%")
+                
+            if territory is not None:
+                clauses.append("territory_filter LIKE ?")
+                params.append(f"%\"{territory}\"%")
+                
+            if is_active is not None:
+                clauses.append("is_active = ?")
+                params.append(int(is_active))
+
+            
+            # Собираем WHERE-блок
+            if clauses:
+                query += " WHERE " + " AND ".join(clauses)
+            
+            # Сортировка + пагинация
+            query += " ORDER BY created_at DESC LIMIT ? OFFSET ?"
+            params.extend([limit, offset])
+            
+            cursor.execute(query, params)
             return [dict(row) for row in cursor.fetchall()]
             
         finally:
@@ -264,7 +338,7 @@ class ProjectService:
             for key, value in kwargs.items():
                 if key in ['species_filter', 'territory_filter'] and value is not None:
                     fields.append(f"{key} = ?")
-                    values.append(json.dumps(value))
+                    values.append(json.dumps(value, ensure_ascii=False))
                 elif key not in ['id', 'created_at', 'updated_at']:
                     fields.append(f"{key} = ?")
                     values.append(value)

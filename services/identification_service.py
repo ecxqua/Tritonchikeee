@@ -113,6 +113,8 @@ class IdentificationService:
         self,
         image_path: str,
         project_ids: Optional[list[int]] = None,
+        territory: Optional[str] = None,
+        species: Optional[str] = None,
         top_k: int = 20,
         debug: bool = False
     ) -> Dict[str, Any]:
@@ -128,7 +130,9 @@ class IdentificationService:
         
         Args:
             image_path: Путь к исходной фотографии
-            project_id: ID проекта (для изоляции поиска) 🔥 FK
+            project_ids: ID проектов (для изоляции поиска) 🔥 FucK it
+            territory: фильтр проектов по территории
+            species: фильтр проектов по видам
             top_k: Количество кандидатов для возврата
             debug: Сохранять ли debug-артефакты YOLO
         
@@ -152,10 +156,31 @@ class IdentificationService:
         }
         
         try:
-            # # Валидация проекта
-            # project = self.project_service.get_project_by_id(project_id)
-            # if not project:
-            #     raise ValueError(f"Проект с ID={project_id} не найден")
+            logger.info("СТАРТ ОБРАБОТКИ")
+            # Валидация проектов
+            if project_ids:
+                for project_id in project_ids:
+                    project = self.project_service.get_project_by_id(project_id)
+                    if not project:
+                        raise ValueError(f"Проект с ID={project_id} не найден")
+            elif territory or species:
+                projects = self.project_service.search_projects(
+                    territory=territory,
+                    species=species
+                )
+                project_ids = [project["id"] for project in projects]
+                if not project_ids:
+                    result['error'] = "Фильтр не нашёл проекты. Либо удалите фильтры, либо измените их."
+                    logger.error(result['error'])
+                    return result
+                else:
+                    logger.info(f"Найденные проекты: {project_ids}")
+            else:
+                # list_projects возвращает List[Dict] с ключами: id, name, description, created_at...
+                projects_to_process = self.project_service.list_projects(active_only=False)
+                project_ids = [project["id"] for project in projects_to_process]
+                logger.info(f"Включён сквозной поиск по всей базе! Найденные проекты: {project_ids}")
+                
 
             # Обработка
             process_result = self.get_crop_and_embedding(image_path, debug)
