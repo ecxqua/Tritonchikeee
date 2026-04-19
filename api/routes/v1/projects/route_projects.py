@@ -1,10 +1,11 @@
-from fastapi import APIRouter, Depends, Form, HTTPException, Response
-from starlette.status import HTTP_201_CREATED
+from fastapi import APIRouter, Body, Depends, Form, HTTPException, Response
 from fastapi.concurrency import run_in_threadpool
 
 from api.dependencies import get_id_service
 from api.error import APIError
 from api.routes.v1.projects import service
+
+from services.identification_service import IdentificationService
 
 
 router = APIRouter()
@@ -17,7 +18,7 @@ async def create_project(
     description: str = Form(...),
     species: str | None = Form(...),
     territory: str | None = Form(...),
-    id_service=Depends(get_id_service),
+    id_service: IdentificationService = Depends(get_id_service),
 ):
     try:
         result = await run_in_threadpool(
@@ -29,7 +30,7 @@ async def create_project(
             id_service,
         )
 
-        response.status_code = HTTP_201_CREATED
+        response.status_code = 201
         return result
     except APIError as ex:
         raise HTTPException(status_code=ex.status, detail=str(ex))
@@ -37,12 +38,84 @@ async def create_project(
 
 @router.get("/projects")
 async def fetch_projects(
-    id_service=Depends(get_id_service),
+    id_service: IdentificationService = Depends(get_id_service),
 ):
     try:
         return await run_in_threadpool(
             service.fetch_projects,
             id_service,
+        )
+    except APIError as ex:
+        raise HTTPException(status_code=ex.status, detail=str(ex))
+
+
+@router.get("/projects/{project_id}")
+async def fetch_project(
+    project_id: int,
+    id_service: IdentificationService = Depends(get_id_service)
+):
+    try:
+        return await run_in_threadpool(
+            service.fetch_project,
+            project_id,
+            id_service,
+        )
+    except APIError as ex:
+        raise HTTPException(status_code=ex.status, detail=str(ex))
+
+
+@router.patch("/projects/{project_id}")
+async def patch_project(
+    project_id: int,
+    name: str | None = Body(None),
+    description: str | None = Body(None),
+    species: str | None = Body(None),
+    territory: str | None = Body(None),
+    id_service: IdentificationService = Depends(get_id_service),
+):
+    try:
+        return await run_in_threadpool(
+            service.update_project,
+            project_id,
+            name,
+            description,
+            species,
+            territory,
+            id_service,
+        )
+    except APIError as ex:
+        raise HTTPException(status_code=ex.status, detail=str(ex))
+
+
+@router.delete("/projects/{project_id}")
+async def delete_project(
+    response: Response,
+    project_id: int,
+    id_service: IdentificationService = Depends(get_id_service)
+):
+    try:
+        result = await run_in_threadpool(
+            service.delete_project,
+            project_id,
+            id_service,
+        )
+
+        response.status_code = 204
+        return result
+    except APIError as ex:
+        raise HTTPException(status_code=ex.status, detail=str(ex))
+
+
+@router.get("/projects/{project_id}/newts")
+async def get_project_newts(
+    project_id: int,
+    id_service: IdentificationService = Depends(get_id_service)
+):
+    try:
+        return await run_in_threadpool(
+            service.get_project_newts,
+            project_id,
+            id_service
         )
     except APIError as ex:
         raise HTTPException(status_code=ex.status, detail=str(ex))

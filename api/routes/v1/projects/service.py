@@ -1,7 +1,20 @@
 from services.identification_service import IdentificationService
+from services.card_service import CardService
 from api.error import APIError
 
 from typing import Any, Dict, List
+
+
+def _resolve_project(project: Dict[str, Any], cards: CardService) -> Dict[str, Any]:
+    return {
+        "id": project["id"],
+        "name": project["name"],
+        "description": project["description"],
+        "species": project["species_filter"],
+        "territory": project["territory_filter"],
+        "createdAt": project["created_at"],
+        "newtCount": len(cards.get_prototypes_by_project(project["id"]))
+    }
 
 
 def create_project(
@@ -34,18 +47,83 @@ def fetch_projects(
     id_service: IdentificationService,      
 ) -> List[Dict[str, Any]]:
     cards = id_service.card_service
-
     projects = id_service.project_service.list_projects()
-    return [
-        {
-            "id": pr["id"],
-            "name": pr["name"],
-            "description": pr["description"],
-            "species": pr["species_filter"],
-            "territory": pr["territory_filter"],
-            "createdAt": pr["created_at"],
-            "newtCount": len(cards.get_prototypes_by_project(pr["id"]))
-        }
-        for pr in projects
-    ]
-    # id_service.card_service.get_prototypes_by_project
+
+    return [_resolve_project(pr, cards) for pr in projects]
+
+
+def fetch_project(
+    id: int,
+    id_service: IdentificationService,
+) -> Dict[str, Any]:
+    cards = id_service.card_service
+    project = id_service.project_service.get_project_by_id(id)
+    if project is None:
+        raise APIError(status=404, msg=f"No project with ID {id}")
+
+    return _resolve_project(project, cards)
+
+
+def update_project(
+    id: int,
+    name: str | None,
+    description: str | None,
+    species: str | None,
+    territory: str | None,
+    id_service: IdentificationService
+) -> Dict[str, Any]:
+    service = id_service.project_service
+
+    project = service.get_project_by_id(id)
+    if project is None:
+        raise APIError(status=404, msg=f"No project with ID {id}")
+
+    params = {
+        k: v for k, v in {
+            "name": name,
+            "description": description,
+            "species_filter": species,
+            "territory_filter": territory,
+        }.items() if v is not None
+    }
+
+    if not service.update_project(id, **params):
+        raise APIError(status=500, msg="Something went wrong")
+
+    return {}
+
+
+def delete_project(
+    id: int,
+    id_service: IdentificationService,
+) -> Dict[str, Any]:
+    if not id_service.project_service.delete_project(id, confirm=True):
+        raise APIError(status=500, msg="Something went wrong")
+
+    return {}
+
+
+def get_project_newts(
+    id: int,
+    id_service: IdentificationService,
+) -> List[Dict[str, Any]]:
+    if id_service.project_service.get_project_by_id(id) is None:
+        raise APIError(status=404, msg=f"No project with ID {id}")
+    
+    result: List[Dict[str, Any]] = []
+    for proto in id_service.card_service.get_prototypes_by_project(id):
+        cards = sorted(proto["cards"], key=lambda c: c["created_at"])
+
+        first = cards[0]
+        last = cards[-1]
+
+        result.append({
+            "id": proto["prototype_id"],
+            "projectId": proto["project_id"],
+            "cardType": last["template_type"],
+            "createdAt": first["created_at"],
+            "sex": first["sex"],
+            "status": first["status"]
+        })
+
+    return result

@@ -17,10 +17,11 @@ def add_new_card(
     card_id: str | None,
     params: Dict[str, str],
     id_service: IdentificationService,
-    card_service: CardService,
     temp: TempStorage
 ) -> Dict[str, Any]:
-    if card_id and card_service.get_individual(card_id):
+    card_service = id_service.card_service
+
+    if card_id and card_service.get_prototype(card_id):
         raise APIError(msg=f"card_id {card_id} already taken", status=409)
 
     if project_id and not project_id.isnumeric():

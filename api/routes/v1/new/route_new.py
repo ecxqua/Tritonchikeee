@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, Form, File, HTTPException, Request, UploadFile
 from fastapi.concurrency import run_in_threadpool
 
-from api.dependencies import get_id_service, get_card_service, get_temp
+from api.dependencies import get_id_service, get_temp
 from api.models import FileData
 from api.routes.v1.new import service
 from api.error import APIError
@@ -21,7 +21,6 @@ async def new(
     template_type: str = Form(...),
     card_id: str | None = Form(...),
     id_service=Depends(get_id_service),
-    card_service=Depends(get_card_service),
     temp=Depends(get_temp)
 ):
     contents = await file.read()
@@ -46,7 +45,6 @@ async def new(
             card_id,
             str_params,
             id_service,
-            card_service,
             temp
         )
     except APIError as ex:
