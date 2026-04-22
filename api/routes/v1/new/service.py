@@ -1,18 +1,17 @@
 from services.identification_service import IdentificationService
-from services.card_service import CardService
 from api.error import APIError
 from api.models import FileData
 from api.services.temp import TempStorage
 
 from utils import sanitize_filename
 
-from typing import Any, Dict
+from typing import Any, Dict, List
 
 
 def add_new_card(
-    file_data: FileData,
+    file_data: List[FileData],
     species: str,
-    project_id: str | None,
+    project_id: int | None,
     template_type: str,
     card_id: str | None,
     params: Dict[str, str],
@@ -21,46 +20,52 @@ def add_new_card(
 ) -> Dict[str, Any]:
     card_service = id_service.card_service
 
-    if card_id and card_service.get_prototype(card_id):
+    if card_id and card_service.get_prototype_by_card_id(card_id):
         raise APIError(msg=f"card_id {card_id} already taken", status=409)
+    
+    if not file_data:
+        raise APIError(msg="No photos were provided", status=400)
+    
+    first_photo = file_data[0]
+    file_data.pop(0)
 
-    if project_id and not project_id.isnumeric():
-        raise APIError(msg="project_id must be an integer", status=400)
-
-    file_name = sanitize_filename(file_data.name)
+    file_name = sanitize_filename(first_photo.name)
 
     path = temp.write_temp_file(
         path=temp.make_temp_file_name(
             begin_with=file_name,
-            end_with=file_data.ext
+            end_with=first_photo.ext
         ),
-        data=file_data.data
-    ),
-
-    crop_output = temp.make_temp_file_name(
-        begin_with=f".{file_name}",
-        end_with=".CROP"
+        data=first_photo.data
     )
-"""
+
     try:
-        id_service.get_crop_and_embedding(
-            image_path=str(path),
-            output_file=str(crop_output),
-            crop_name=file_name,
-            debug=False
-        )
-
-
-        id = card_service.save_new_individual(
-            photo_path_cropped=str(crop_output),
+        result = id_service.add_new_individual(
             species=species,
-            project_id=int(project_id) if project_id else None,
+            project_id=project_id,
             template_type=template_type,
-            card_id=card_id,
-            card_data=params
+            image_path=str(path)
         )
 
-        return {"card_id": id}
+        if result["error"] is not None:
+            raise APIError(status=500, msg=result["error"])
+        
+        card = result["card_id"]
+        
+        if file_data:
+            for photo in file_data:
+                file_name = sanitize_filename(photo.name)
+
+                photo_path = temp.write_temp_file(
+                    path=temp.make_temp_file_name(
+                        begin_with=file_name,
+                        end_with=photo.ext
+                    ),
+                    data=photo.data
+                )
+
+                id_service.add_photo_to_card(card, str(photo_path))
+        
+        return {"id": card}
     except Exception as ex:
-        raise APIError(msg=str(ex), status=500)
-"""
+        raise APIError(status=500, msg=str(ex))

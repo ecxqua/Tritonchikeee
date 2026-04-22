@@ -1,4 +1,5 @@
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 
 from api.routes import router
@@ -24,7 +25,14 @@ async def lifespan(api: FastAPI):
 def make_app() -> FastAPI:
     app = FastAPI(
         title="Newt Identification by Tutochki",
-        lifespan=lifespan
+        lifespan=lifespan,
+    )
+
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_methods=["*"],
+        allow_headers=["*"],
     )
 
     app.include_router(router.v1_router)

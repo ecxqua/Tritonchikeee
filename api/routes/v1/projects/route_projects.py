@@ -7,6 +7,8 @@ from api.routes.v1.projects import service
 
 from services.identification_service import IdentificationService
 
+from typing import List
+
 
 router = APIRouter()
 
@@ -16,8 +18,8 @@ async def create_project(
     response: Response,
     name: str = Form(...),
     description: str = Form(...),
-    species: str | None = Form(...),
-    territory: str | None = Form(...),
+    species: List[str] | None = Form(None),
+    territory: List[str] | None = Form(None),
     id_service: IdentificationService = Depends(get_id_service),
 ):
     try:
@@ -66,15 +68,16 @@ async def fetch_project(
 
 @router.patch("/projects/{project_id}")
 async def patch_project(
+    response: Response,
     project_id: int,
     name: str | None = Body(None),
     description: str | None = Body(None),
-    species: str | None = Body(None),
-    territory: str | None = Body(None),
+    species: List[str] | None = Body(None),
+    territory: List[str] | None = Body(None),
     id_service: IdentificationService = Depends(get_id_service),
 ):
     try:
-        return await run_in_threadpool(
+        result = await run_in_threadpool(
             service.update_project,
             project_id,
             name,
@@ -83,6 +86,9 @@ async def patch_project(
             territory,
             id_service,
         )
+
+        response.status_code = 204
+        return result
     except APIError as ex:
         raise HTTPException(status_code=ex.status, detail=str(ex))
 

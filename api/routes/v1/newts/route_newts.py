@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Body, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.concurrency import run_in_threadpool
 
 from api.dependencies import get_id_service
@@ -26,14 +26,14 @@ async def get_newt_by_id(
         raise HTTPException(status_code=ex.status, detail=str(ex))
 
 
-@router.get("/newts/{newt_id}/card")
-async def get_card_by_newt_id(
+@router.get("/newts/{newt_id}/cards")
+async def get_cards_by_newt_id(
     newt_id: str,
     id_service: IdentificationService = Depends(get_id_service)
 ):
     try:
         return await run_in_threadpool(
-            service.get_card_by_newt_id,
+            service.get_cards_by_newt_id,
             newt_id,
             id_service
         )
@@ -44,17 +44,21 @@ async def get_card_by_newt_id(
 @router.patch("/newts/{newt_id}/card")
 async def patch_card_by_newt_id(
     request: Request,
+    response: Response,
     newt_id: str,
     id_service: IdentificationService = Depends(get_id_service),
 ):
     params = dict(await request.form())
 
     try:
-        return await run_in_threadpool(
+        result = await run_in_threadpool(
             service.patch_card_by_newt_id,
             newt_id,
             params,
             id_service,
         )
+
+        response.status_code = 204
+        return result
     except APIError as ex:
         raise HTTPException(status_code=ex.status, detail=str(ex))

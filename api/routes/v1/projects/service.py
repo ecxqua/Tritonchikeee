@@ -20,8 +20,8 @@ def _resolve_project(project: Dict[str, Any], cards: CardService) -> Dict[str, A
 def create_project(
     name: str,
     description: str,
-    species: str | None,
-    territory: str | None,
+    species: List[str] | None,
+    territory: List[str] | None,
     id_service: IdentificationService,
 ) -> Dict[str, Any]:
     name = name.strip()
@@ -30,15 +30,12 @@ def create_project(
     if not name or not description:
         raise APIError(status=400, msg=f"Name/description cannot be blank")
 
-    species_filter = [species] if species else None
-    territory_filter = [territory] if territory else None
-
     return {
         "id": id_service.project_service.get_or_create_project(
             name=name,
             description=description,
-            species_filter=species_filter,
-            territory_filter=territory_filter
+            species_filter=species,
+            territory_filter=territory
         )
     }
 
@@ -68,8 +65,8 @@ def update_project(
     id: int,
     name: str | None,
     description: str | None,
-    species: str | None,
-    territory: str | None,
+    species: List[str] | None,
+    territory: List[str] | None,
     id_service: IdentificationService
 ) -> Dict[str, Any]:
     service = id_service.project_service
@@ -78,7 +75,7 @@ def update_project(
     if project is None:
         raise APIError(status=404, msg=f"No project with ID {id}")
 
-    params = {
+    params: Dict[str, Any] = {
         k: v for k, v in {
             "name": name,
             "description": description,
@@ -109,7 +106,7 @@ def get_project_newts(
 ) -> List[Dict[str, Any]]:
     if id_service.project_service.get_project_by_id(id) is None:
         raise APIError(status=404, msg=f"No project with ID {id}")
-    
+
     result: List[Dict[str, Any]] = []
     for proto in id_service.card_service.get_prototypes_by_project(id):
         cards = sorted(proto["cards"], key=lambda c: c["created_at"])
@@ -118,12 +115,12 @@ def get_project_newts(
         last = cards[-1]
 
         result.append({
-            "id": proto["prototype_id"],
-            "projectId": proto["project_id"],
-            "cardType": last["template_type"],
-            "createdAt": first["created_at"],
-            "sex": first["sex"],
-            "status": first["status"]
+            "id": proto.get("prototype_id", None),
+            "projectId": proto.get("project_id", None),
+            "cardType": last.get("template_type", None),
+            "createdAt": first.get("created_at", None),
+            "sex": first.get("sex", None),
+            "status": first.get("status", None)
         })
 
-    return result
+    return sorted(result, key=lambda item: int(item["id"].split("-")[-1]))

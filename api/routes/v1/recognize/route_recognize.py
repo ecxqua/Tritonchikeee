@@ -16,7 +16,7 @@ router = APIRouter()
 async def recognize(
     photo: UploadFile = File(...),  # multipart/form-data request
     scope: str = Form(...),
-    projectId: int | None = Form(...),
+    projectId: int | None = Form(None),
     id_service=Depends(get_id_service),
     temp=Depends(get_temp)
 ):

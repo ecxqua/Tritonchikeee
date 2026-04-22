@@ -4,20 +4,48 @@ from api.error import APIError
 from api.models.file_data import FileData
 from utils import sanitize_filename
 
+from pathlib import Path
 from typing import Any, Dict
+
+import base64
+import mimetypes
 
 
 _allowed_scopes = {"all", "by_species", "by_territory"}
 
 
 def _build_match(
-    match: Dict[str, Any]
+    match: Dict[str, Any],
+    id_service: IdentificationService,
 ) -> Dict[str, Any]:
-    return {
-        "newtId": match["prototype_id"],
-        "confidence": match["similarity_percent"],
-        "photoUrl": "..."
+    id: str = match["prototype_id"]
+    similarity: float = match["similarity_percent"]
+
+    result: dict[str, Any] = {
+        "newtId": id,
+        "confidence": similarity,
+        "photoUrl": "unknown"
     }
+
+    photos = id_service.card_service.get_prototype_photos(id)
+    if photos:
+        path = photos[0]["photo_path"]
+        photo_base64 = None
+
+        if path and isinstance(path, str):
+            file_path = Path(path)
+
+            if file_path.exists():
+                mime_type, _ = mimetypes.guess_type(file_path)
+                mime_type = mime_type or "image/jpeg"
+
+                with open(file_path, "rb") as f:
+                    encoded = base64.b64encode(f.read()).decode("utf-8")
+
+                photo_base64 = f"data:{mime_type};base64,{encoded}"
+                result["photoUrl"] = photo_base64
+
+    return result
 
 
 def complete_recognize(
@@ -48,7 +76,7 @@ def complete_recognize(
     try:
         res = id_service.identify_and_prepare(
             image_path=str(path),
-            project_id=1,
+            project_ids=[1],
             top_k=5,
             debug=True
         )
@@ -61,7 +89,7 @@ def complete_recognize(
         return {
             "status": "found",
             "matches": [
-                _build_match(match)
+                _build_match(match, id_service)
                 for match in res["candidates"]
             ]
         }

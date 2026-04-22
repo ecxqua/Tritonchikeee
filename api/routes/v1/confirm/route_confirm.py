@@ -14,7 +14,7 @@ async def confirm(
     request: Request,
     upload_id: int = Form(...),
     decision: str = Form(...),
-    existing_id: str | None = Form(...),
+    existing_id: str | None = Form(None),
     id_service=Depends(get_id_service)
 ):
     params = dict(await request.form())

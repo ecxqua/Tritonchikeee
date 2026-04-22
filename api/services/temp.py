@@ -18,7 +18,7 @@ class TempStorage:
     ) -> Path:
         begin_with = begin_with or ""
         end_with = end_with or ""
-        return self.TEMP_DIR / f"{begin_with}{uuid.uuid4().hex}{end_with}"
+        return self.TEMP_DIR / f"{begin_with}.{uuid.uuid4().hex}{end_with}"
 
     def write_temp_file(self, path: Path, data: bytes):
         path.write_bytes(data)

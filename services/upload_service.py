@@ -115,7 +115,7 @@ class UploadService:
         file_parent = str(Path(file_path).parent)
         logger.info("Родительская папка сохранённого кропа: " + file_parent)
         file_path = str(Path(file_path).rename(
-            f"{file_parent}\{upload_id}{file_suffix}"
+            f"{file_parent}\\{upload_id}{file_suffix}"
         ))
         
         try:
