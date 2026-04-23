@@ -1,4 +1,5 @@
-from fastapi import APIRouter, Depends, Form, File, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Depends, Form, File, HTTPException, \
+    Request, UploadFile
 from fastapi.concurrency import run_in_threadpool
 
 from api.dependencies import get_id_service, get_temp
@@ -36,7 +37,7 @@ async def new(
         ))
 
     params = dict(await request.form())
-    
+
     str_params = {k: v for k, v in params.items() if isinstance(v, str)}
 
     try:

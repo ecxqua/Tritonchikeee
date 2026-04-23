@@ -5,7 +5,10 @@ from api.error import APIError
 from typing import Any, Dict, List
 
 
-def _resolve_project(project: Dict[str, Any], cards: CardService) -> Dict[str, Any]:
+def _resolve_project(
+    project: Dict[str, Any],
+    cards: CardService
+) -> Dict[str, Any]:
     return {
         "id": project["id"],
         "name": project["name"],
@@ -28,7 +31,7 @@ def create_project(
     description = description.strip()
 
     if not name or not description:
-        raise APIError(status=400, msg=f"Name/description cannot be blank")
+        raise APIError(status=400, msg="Name/description cannot be blank")
 
     return {
         "id": id_service.project_service.get_or_create_project(
@@ -41,7 +44,7 @@ def create_project(
 
 
 def fetch_projects(
-    id_service: IdentificationService,      
+    id_service: IdentificationService,
 ) -> List[Dict[str, Any]]:
     cards = id_service.card_service
     projects = id_service.project_service.list_projects()

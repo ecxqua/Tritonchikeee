@@ -57,9 +57,9 @@ def complete_recognize(
 ) -> Dict[str, Any]:
     if scope not in _allowed_scopes:
         raise APIError(status=400, msg=f"Incorrect scope {scope}")
-    
+
     if project_id is not None and \
-        id_service.project_service.get_project_by_id(project_id) is None:
+            id_service.project_service.get_project_by_id(project_id) is None:
         raise APIError(status=400, msg=f"Unknown project ID {project_id}")
 
     path = temp.write_temp_file(
@@ -70,7 +70,7 @@ def complete_recognize(
         data=file_data.data
     )
 
-    # add filters later
+    # TODO add filters later
     # with scope and projectId
 
     try:
@@ -83,7 +83,7 @@ def complete_recognize(
 
         error = res["error"]
         if error is not None:
-            return { "status": "not_found" }
+            return {"status": "not_found"}
             # raise APIError(status=500, msg=error)
 
         return {
@@ -93,6 +93,6 @@ def complete_recognize(
                 for match in res["candidates"]
             ]
         }
-    except ValueError as ex:
+    except ValueError:
         # raise APIError(status=400, msg=str(ex))
-        return { "status": "not_found" }
+        return {"status": "not_found"}

@@ -22,10 +22,10 @@ def add_new_card(
 
     if card_id and card_service.get_prototype_by_card_id(card_id):
         raise APIError(msg=f"card_id {card_id} already taken", status=409)
-    
+
     if not file_data:
         raise APIError(msg="No photos were provided", status=400)
-    
+
     first_photo = file_data[0]
     file_data.pop(0)
 
@@ -49,9 +49,9 @@ def add_new_card(
 
         if result["error"] is not None:
             raise APIError(status=500, msg=result["error"])
-        
+
         card = result["card_id"]
-        
+
         if file_data:
             for photo in file_data:
                 file_name = sanitize_filename(photo.name)
@@ -65,7 +65,7 @@ def add_new_card(
                 )
 
                 id_service.add_photo_to_card(card, str(photo_path))
-        
+
         return {"id": card}
     except Exception as ex:
         raise APIError(status=500, msg=str(ex))

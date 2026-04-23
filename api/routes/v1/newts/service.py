@@ -7,6 +7,7 @@ import base64
 import mimetypes
 from pathlib import Path
 
+
 def get_newt_by_id(
     id: str,
     id_service: IdentificationService,
@@ -14,7 +15,7 @@ def get_newt_by_id(
     proto = id_service.card_service.get_prototype(id)
     if not proto:
         raise APIError(status=404, msg=f"No prototype by ID {id}")
-    
+
     cards = sorted(proto["cards"], key=lambda c: c["created_at"])
 
     first = cards[0]
@@ -37,7 +38,7 @@ def get_cards_by_newt_id(
     proto = id_service.card_service.get_prototype(id)
     if not proto:
         raise APIError(status=404, msg=f"No prototype by ID {id}")
-    
+
     result: List[Dict[str, Any]] = []
 
     for card in proto["cards"]:
@@ -60,7 +61,11 @@ def get_cards_by_newt_id(
 
                     photo_base64 = f"data:{mime_type};base64,{encoded}"
                     photos.append(photo_base64)
-        
+
+        first_photo: Dict[str, Any] = {}
+        if photo_objs:
+            first_photo = photo_objs[0]
+
         result.append({
             "cardType": card["template_type"],
             "data": {k: v for k, v in {
@@ -71,7 +76,7 @@ def get_cards_by_newt_id(
                 "sex": card.get("sex", None),
                 "exactBirthDate": card.get("birth_year_exact", None),
                 "estimatedBirthDate": card.get("birth_year_approx", None),
-                "photoNumber": "",  # ???
+                "photoNumber": first_photo.get("photo_number", None),
                 "regionOfOrigin": card.get("origin_region", None),
                 "measurementDevice": card.get("length_device", None),
                 "scaleBrand": card.get("weight_device", None),
@@ -81,9 +86,9 @@ def get_cards_by_newt_id(
                 "motherId": card.get("parent_female_id", None),
                 "totalLength": card.get("length_total", None),
                 "waterBodyName": card.get("water_body_name", None),
-                "encounterDate": "",  # ???
+                "encounterDate": "",  # not tracked rn
                 "encounterTime": card.get("meeting_time", None),
-                "bellyPhotoNumber": "",  # ???
+                "bellyPhotoNumber": first_photo.get("photo_id", None),
                 "status": card.get("status", None),
                 "waterBodyNumber": card.get("water_body_number", None),
             }.items() if v is not None},
@@ -101,11 +106,11 @@ def patch_card_by_newt_id(
     proto = id_service.card_service.get_prototype_by_card_id(id)
     if not proto:
         raise APIError(status=404, msg=f"No prototype by ID {id}")
-    
+
     card = sorted(proto["cards"], key=lambda c: c["created_at"])[0]
     card_id = card["card_id"]
-    
+
     if not id_service.card_service._update_card(card_id, **params):
         raise APIError(status=500, msg="Something went wrong")
-    
+
     return {}

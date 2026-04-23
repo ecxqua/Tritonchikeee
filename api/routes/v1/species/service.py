@@ -4,6 +4,6 @@ from typing import List
 
 
 def fetch_species(
-    id_service: IdentificationService,      
+    id_service: IdentificationService,
 ) -> List[str]:
     return id_service.project_service.get_unique_filters()["species"]
