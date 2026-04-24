@@ -1,7 +1,8 @@
 ## Running
 ```bash
-git clone https://github.com/d1scocat/Tritonchikapp.git
+git clone https://github.com/ecxqua/Tritonchikeee.git
 cd Tritonchikapp
+cd web
 npm install
 npm run start
 ```
@@ -10,11 +11,10 @@ npm run start
 if you use any proxy or other network redirecting application on your device, it might interfere with the internal Vite -- Electron bridge
 
 ## API
-this app is useless without an api, access it at the respective repository (do this in a different repository):
+this app is useless without an api, run it this way (do this in a different directory):
 ```bash
 git clone https://github.com/ecxqua/Tritonchikeee.git
 cd Tritonchikeee
-git checkout api
 python -m venv .venv
 .venv\Scripts\activate
 pip install -r requirements.txt
