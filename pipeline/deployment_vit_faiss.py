@@ -216,66 +216,42 @@ def get_embedding_from_array(
 ) -> Optional[np.ndarray]:
     """
     Получить эмбеддинг из numpy array (без чтения с диска).
-    
-    КЛЮЧЕВАЯ ФУНКЦИЯ для in-memory пайплайна:
-        YOLO → crop_array (в памяти) → ViT → embedding
-    
-    Преимущества:
-        - Нет записи на диск → быстрее на ~50-100ms
-        - Нет чтения с диска → меньше I/O операций
-        - Нет временных файлов → чище архитектура
-    
+
+    Пайплайн: YOLO (BGR) → RGB → ViT → embedding (512-dim, L2-norm).
+    Используется для in-memory обработки и миграции индекса.
+
     Args:
-        crop_array: numpy array изображения (H, W, 3) в формате BGR или RGB
-        model: Загруженная модель ViT
+        crop_array: numpy array (H, W, 3) в формате BGR (стандарт OpenCV/YOLO)
+        model: Загруженная модель ViT (EnhancedTripletNet)
         transform: Трансформы для предобработки
         device: Устройство для вычислений
-    
+
     Returns:
-        Вектор размерности (512,), L2 нормализован, или None при ошибке
-    
-    Raises:
-        ValueError: Если array имеет неверный формат
+        np.ndarray: Вектор размерности (512,) или None при ошибке
     """
     try:
-        # Валидация входных данных
-        if crop_array is None:
-            logger.error("crop_array не может быть None")
+        # 🔍 Валидация: проверяем тип и форму одним условием
+        if not isinstance(crop_array, np.ndarray) or crop_array.ndim != 3 or crop_array.shape[2] != 3:
+            logger.error(f"Неверный формат массива: ожидался (H, W, 3), получено {getattr(crop_array, 'shape', type(crop_array))}")
             return None
-        
-        if not isinstance(crop_array, np.ndarray):
-            logger.error(f"crop_array должен быть numpy array, получено {type(crop_array)}")
-            return None
-        
-        if len(crop_array.shape) != 3:
-            logger.error(f"Неверная размерность crop_array: {crop_array.shape}, ожидалось (H, W, 3)")
-            return None
-        
-        # Конвертация BGR → RGB (если пришёл из OpenCV)
-        # OpenCV загружает в BGR, PIL ожидает RGB
-        if crop_array.shape[2] == 3:
-            # Проверяем порядок каналов по значениям
-            # Если среднее значение синего канала значительно больше красного → BGR
-            if np.mean(crop_array[:, :, 0]) > np.mean(crop_array[:, :, 2]):
-                crop_array = cv2.cvtColor(crop_array, cv2.COLOR_BGR2RGB)
-        
-        # Конвертация numpy → PIL Image
+
+        # 🔥 FIX: Безусловная конвертация BGR → RGB
+        # YOLO/OpenCV всегда отдают BGR. Эвристика сравнения каналов была ненадёжна 
+        # и приводила к падению метрик схожести (косинус ~0.87 вместо >0.99).
+        crop_array = cv2.cvtColor(crop_array, cv2.COLOR_BGR2RGB)
+
+        # Предобработка и инференс
         image = Image.fromarray(crop_array)
-        
-        # Применение трансформов и инференс
         image_tensor = transform(image).unsqueeze(0).to(device)
-        
+
         with torch.no_grad():
             embedding = model(image_tensor)
-        
-        result = embedding.cpu().numpy().flatten()
-        logger.debug(f"Эмбеддинг получен из array: shape={result.shape}")
-        return result
-    
+
+        # Модель уже возвращает L2-нормализованный вектор (см. cv_models_report.md)
+        return embedding.cpu().numpy().flatten()
+
     except Exception as e:
-        logger.error(f"Ошибка обработки crop_array: {str(e)}")
-        import traceback
-        traceback.print_exc()
+        logger.error(f"Ошибка получения эмбеддинга из массива: {e}")
         return None
 
 # =============================================================================

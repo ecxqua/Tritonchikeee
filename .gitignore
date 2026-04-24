@@ -31,12 +31,16 @@ bot/conservation/*.jpg
 bot/conservation/*.jpeg
 bot/conservation/*.png
 data/dataset_crop/database_embeddings.pkl
-models/
+data/embeddings/
+data/output_old/
+/models/
 data/input/
 data/output/
 data/output_old/
 data/cropped/
 data/embeddings/
+data/_temp_input
+data/full/
 
 # Training outputs and checkpoints
 keypoints_01_12_2025/

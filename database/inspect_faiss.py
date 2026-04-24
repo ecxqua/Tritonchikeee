@@ -26,9 +26,9 @@ print(f"{'FAISS idx':<10} {'Особь':<15} {'Вид':<12} {'Вектор (пе
 print("=" * 100)
 
 cursor.execute("""
-    SELECT p.embedding_index, p.individual_id, p.photo_path, i.species
+    SELECT p.embedding_index, p.card_id, p.photo_path, i.species
     FROM photos p
-    JOIN individuals i ON p.individual_id = i.individual_id
+    JOIN cards i ON p.card_id = i.card_id
     WHERE p.embedding_index != -1
     ORDER BY p.embedding_index
     LIMIT 10
@@ -46,7 +46,7 @@ for row in cursor.fetchall():
         vec = index.reconstruct(idx)
         vec_str = f"[{vec[0]:.3f}, {vec[1]:.3f}, {vec[2]:.3f}, {vec[3]:.3f}, {vec[4]:.3f}, {vec[5]:.3f}, {vec[6]:.3f}, {vec[7]:.3f}...]"
     
-    print(f"{idx:<10} {row['individual_id']:<15} {row['species']:<12} {vec_str:<60}")
+    print(f"{idx:<10} {row['card_id']:<15} {row['species']:<12} {vec_str:<60}")
 
 # Проверка синхронизации
 cursor.execute("SELECT COUNT(*) FROM photos WHERE embedding_index != -1")

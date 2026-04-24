@@ -14,6 +14,7 @@ services/upload_service.py — CRUD для временных загрузок (
 import logging
 import json
 import sqlite3
+from pathlib import Path
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any, List
 
@@ -93,7 +94,6 @@ class UploadService:
     
     def create_upload(
         self,
-        project_id: int,
         file_path: str,
         embedding: Any,
         expiry_hours: int = UPLOAD_EXPIRY_HOURS
@@ -108,12 +108,21 @@ class UploadService:
         now = datetime.now()
         expires_at = now + timedelta(hours=expiry_hours)
         embedding_json = serialize_embedding(embedding)
+
+        # Смена под upload_id
+        upload_id = self.get_stats()["total"] + 1
+        file_suffix = Path(file_path).suffix
+        file_parent = str(Path(file_path).parent)
+        logger.info("Родительская папка сохранённого кропа: " + file_parent)
+        file_path = str(Path(file_path).rename(
+            f"{file_parent}\\{upload_id}{file_suffix}"
+        ))
         
         try:
             cursor.execute('''
                 INSERT INTO uploads (project_id, file_path, embedding, status, created_at, expires_at)
                 VALUES (?, ?, ?, 'pending', ?, ?)
-            ''', (project_id, file_path, embedding_json, now.isoformat(), expires_at.isoformat()))
+            ''', (-1, file_path, embedding_json, now.isoformat(), expires_at.isoformat()))
             
             upload_id = cursor.lastrowid
             conn.commit()

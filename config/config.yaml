@@ -4,10 +4,21 @@ models:
 # Конфигурация модели сегментации.
 seg-model:
   path: "models/best_seg.pt"
+  pose_model_path: "models/best_pose.pt"
   trim_top_pct: 0.3
   trim_bottom_pct: 0.15
   final_size: 244
   debug: False  # Неактивно, меняется в аргументах
+  pose_align_enabled: True  # Включена ротация по pose keypoints
+  pose_head_kpt_index: 0  # Рекомендовано для текущей pose-модели
+  pose_tail_kpt_index: 1  # Рекомендовано для текущей pose-модели
+  pose_min_kpt_conf: 0.25
+  pose_rotation_mode: "force-up"
+  pose_rotation_direction: -1.0 
+  pose_upright_skip_threshold_deg: 20.0  # Если ближе к вертикали, не вращаем
+  pose_min_rotation_deg: 5.0  # Игнорируем микроповороты как шум
+  pose_swap_penalty_deg: 35.0  # Слабый приоритет configured_mapping
+  pose_flip_vertical_ratio: 1.15
 
 # Конфигурация модели идентификации.
 id-model:
@@ -20,6 +31,7 @@ db:
   db_path: "database/cards.db"
   faiss_index_path: "data/embeddings/database_embeddings.pkl"
   cropped_folder: "data/cropped/"
+  full_folder: "data/full/"
   "expiry_hours": 0.00001  # Через сколько просрочиваются записи в uploads
 
 view:
