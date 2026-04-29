@@ -151,7 +151,7 @@ class IdentificationService:
             Dict:
                 - upload_id: int (для confirm_decision)
                 - embedding: np.ndarray (вектор)
-                - crop_path: str (путь к кропу)
+                - crop_path: str (путь к кропу, ОСТОРОЖНО: временный путь)
                 - candidates: List[Dict] (топ-K похожих особей)
                 - success: bool
                 - error: str | None

@@ -38,6 +38,27 @@ REQUIRED_FIELDS = {
     'КВ-2': ['status', 'water_body_name']
 }
 
+ALLOWED_FIELDS = {
+    'ИК-1': [
+        'date', 'length_body', 'weight', 'sex',
+        'birth_year_exact', 'birth_year_approx', 
+        'origin_region', 'length_device', 'weight_device', 'notes'
+    ],
+    'ИК-2': [
+        'date', 'release_date', 'parent_male_id', 'parent_female_id',
+        'length_total', 'weight', 'water_body_name', 'notes'
+    ],
+    'КВ-1': [
+        'date', 'meeting_time', 'length_body', 'length_tail',
+        'weight', 'sex', 'status', 'water_body_number',
+        'length_device', 'weight_device', 'notes'
+    ],
+    'КВ-2': [
+        'date', 'meeting_time', 'length_total',
+        'status', 'water_body_name', 'notes'
+    ]
+}
+
 SPECIES_PREFIX = {
     'Карелина': 'K',
     'Гребенчатый': 'R',
@@ -54,15 +75,34 @@ def get_db_connection(db_path: str = DB_PATH) -> sqlite3.Connection:
     conn.row_factory = sqlite3.Row
     return conn
 
-def _validate_template_fields(template_type: str, card_data: dict) -> None:
-    """Проверяет наличие обязательных полей для выбранного шаблона."""
+def _validate_template_fields(template_type: str, card_data: dict) -> dict:
+    """
+    Проверяет наличие обязательных полей и отсутствие лишних для выбранного шаблона.
+    Возвращает очищенный dict card_data (содержит только допустимые поля).
+    """
+    allowed = ALLOWED_FIELDS.get(template_type)
+    if allowed is None:
+        raise ValueError(f"Неизвестный тип шаблона: {template_type}")
+
+    # 1. Проверка обязательных полей
     required = REQUIRED_FIELDS.get(template_type, [])
-    missing = [field for field in required if card_data.get(field) is None]
+    missing = [f for f in required if f not in card_data or card_data.get(f) is None]
     if missing:
         raise ValueError(
             f"Для шаблона '{template_type}' обязательны поля: {', '.join(missing)}\n"
             f"Переданные данные: {list(card_data.keys())}"
         )
+
+    # 2. Проверка на лишние поля
+    extra = [f for f in card_data.keys() if f not in allowed]
+    if extra:
+        raise ValueError(
+            f"Шаблон '{template_type}' не поддерживает следующие поля: {', '.join(extra)}\n"
+            f"Допустимые поля: {allowed}"
+        )
+
+    # 3. Возвращаем только разрешённые поля (защита от SQL-инъекций/мусора)
+    return {k: v for k, v in card_data.items() if k in allowed}
 
 def get_next_prototype_number(cursor: sqlite3.Cursor, species: str) -> int:
     """Возвращает следующий порядковый номер для животного данного вида."""
@@ -230,7 +270,7 @@ class CardService:
             "success": False,
             "error": None
         }
-        _validate_template_fields(template_type, card_data)
+        card_data = _validate_template_fields(template_type, card_data)
         
         conn = get_db_connection(self.db_path)
         cursor = conn.cursor()
@@ -425,7 +465,7 @@ class CardService:
         if template_type not in ['КВ-1', 'КВ-2']:
             raise ValueError("Для добавления встречи используйте шаблоны КВ-1 или КВ-2")
         
-        _validate_template_fields(template_type, card_data)
+        card_data = _validate_template_fields(template_type, card_data)
 
         # Правильно генерируем ID новой особи.
         # NT-K-13 -> NT-K-13-КВ1
@@ -493,12 +533,15 @@ class CardService:
         if not kwargs:
             logger.warning("Нет полей для обновления")
             return False
+        # Валидация полей
+        template_type: str = self.get_card(card_id)["template_type"]
+        card_data = _validate_template_fields(template_type, kwargs)
         
         conn = get_db_connection(self.db_path)
         cursor = conn.cursor()
         
-        fields = [f"{key} = ?" for key in kwargs.keys()]
-        values = list(kwargs.values()) + [card_id]
+        fields = [f"{key} = ?" for key in card_data.keys()]
+        values = list(card_data.values()) + [card_id]
         
         query = f"UPDATE cards SET {', '.join(fields)} WHERE card_id = ?"
         cursor.execute(query, values)

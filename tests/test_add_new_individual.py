@@ -13,6 +13,6 @@ print(service.add_new_individual(
     **{
         'length_body': 55,
         'weight': 3.22,
-        'sex': 'М'
+        'sex': 'М',
     }
 ))
