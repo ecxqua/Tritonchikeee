@@ -39,7 +39,16 @@ REQUIRED_FIELDS = {
     'КВ-2': ['status', 'water_body_name']
 }
 
-BASE_FIELDS = {'card_id', 'template_type', 'species', 'territory', 'project_id', 'project_name', 'created_at'}
+BASE_FIELDS = {
+    'card_id',
+    'prototype_id',
+    'template_type',
+    'species',
+    'territory',
+    'project_id',
+    'project_name',
+    'created_at'
+}
 
 ALLOWED_FIELDS = {
     'ИК-1': [
