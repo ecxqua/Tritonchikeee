@@ -14,7 +14,10 @@ let config = {
 
 function loadConfig() {
   try {
-    const configPath = path.join(app.getAppPath(), "app-cfg.json");
+    const configPath = app.isPackaged
+      ? path.join(process.resourcesPath, "app-cfg.json")
+      : path.join(__dirname, "../../app-cfg.json");
+
     const raw = fs.readFileSync(configPath, "utf-8");
     config = JSON.parse(raw);
   } catch {
@@ -32,25 +35,45 @@ const createWindow = () => {
     width: 800,
     height: 600,
     title: "NewtTracker",
-    icon: `${__dirname}/renderer/assets/logo.png`,
+    icon: path.join(__dirname, "assets/logo.png"),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
+      webSecurity: false
     },
   });
 
   mainWindow.setMenuBarVisibility(false);
 
+  mainWindow.webContents.on('did-fail-load', (_, errorCode, errorDescription) => {
+    console.error('Failed to load:', errorCode, errorDescription);
+  });
+
+  mainWindow.webContents.on('console-message', (_, level, message) => {
+    console.log('Renderer:', message);
+  });
+
+  mainWindow.webContents.on('did-fail-load', (_, errorCode, errorDescription, validatedURL) => {
+    console.error('❌ did-fail-load:', errorCode, errorDescription, validatedURL);
+  });
+
+  mainWindow.webContents.on('did-finish-load', () => {
+    console.log('✅ did-finish-load');
+  });
+
+  mainWindow.webContents.on("render-process-gone", (_, details) => {
+    console.error("RENDER CRASHED:", details);
+  });
+
+  const pathToFile = path.join(__dirname, '../renderer/main_window/index.html');
+
   // and load the index.html of the app.
   if (MAIN_WINDOW_VITE_DEV_SERVER_URL) {
     mainWindow.loadURL(MAIN_WINDOW_VITE_DEV_SERVER_URL);
   } else {
-    mainWindow.loadFile(
-      path.join(__dirname, `../renderer/${MAIN_WINDOW_VITE_NAME}/index.html`),
-    );
-  }
+    mainWindow.loadFile(pathToFile);
+  };
 
   // Open the DevTools.
-  // mainWindow.webContents.openDevTools();
 };
 
 // This method will be called when Electron has finished

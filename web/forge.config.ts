@@ -10,10 +10,19 @@ import { FuseV1Options, FuseVersion } from '@electron/fuses';
 const config: ForgeConfig = {
   packagerConfig: {
     asar: true,
+    name: "NewtTracker",
+    executableName: "NewtTracker.exe",
+    icon: "./src/renderer/assets/logo.ico",
+    extraResource: [
+      "app-cfg.json"
+    ]
   },
   rebuildConfig: {},
   makers: [
-    new MakerSquirrel({}),
+    new MakerSquirrel({
+      name: "NewtTracker",
+      setupIcon: "./src/renderer/assets/logo.ico"
+    }),
     new MakerZIP({}, ['darwin']),
     new MakerRpm({}),
     new MakerDeb({}),
@@ -38,7 +47,7 @@ const config: ForgeConfig = {
       renderer: [
         {
           name: 'main_window',
-          config: 'vite.renderer.config.ts',
+          config: 'vite.renderer.config.ts'
         },
       ],
     }),

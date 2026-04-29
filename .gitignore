@@ -53,3 +53,6 @@ yolo11s_seg_last/
 # Optional local docs/attachments
 *.pdf
 test.py
+
+dist/
+out/

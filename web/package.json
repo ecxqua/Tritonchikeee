@@ -1,8 +1,8 @@
 {
-  "name": "tritonchikapp",
-  "productName": "tritonchikapp",
+  "name": "newt-tracker",
+  "productName": "NewtTracker",
   "version": "1.0.0",
-  "description": "My Electron application description",
+  "description": "Newt identification toolkit",
   "main": ".vite/build/main.js",
   "private": true,
   "scripts": {
@@ -35,6 +35,7 @@
     "@typescript-eslint/parser": "^5.62.0",
     "autoprefixer": "^10.5.0",
     "electron": "41.2.1",
+    "electron-builder": "^26.8.1",
     "eslint": "^8.57.1",
     "eslint-plugin-import": "^2.32.0",
     "postcss": "^8.5.10",

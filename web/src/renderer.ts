@@ -32,4 +32,4 @@ console.log(
   '👋 This message is being logged by "renderer.ts", included via Vite',
 );
 
-const { baseUrl } = await window.config.get();
+// const { baseUrl } = await window.config.get();
