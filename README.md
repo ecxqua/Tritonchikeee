@@ -1,41 +1,43 @@
 # Система идентификации индивидуальных особей тритонов
-## Система обработки фотографии с выбором и сохранением (основа для API)
-### Структура проекта
-* config: файлы конфигурации для путей и некоторых переменных
-* data: фотографии брюшек (старые и новые) и эмбеддинги (faiss-index)
-* database: обслуживание базы данных и сама база (cards.db)
-* pipeline: ядро анализа (YOLO, ViT)
-* services: ядро логики, оркестрациии работы приложения в целом (входы для API в `services/identificaition_service.py`, подробнее в `services/api.md`)
-* tests: тестовые примеры для работы с некоторыми из файлов
-* train: артефакты обучения и обучение моделей
 
-### Запуск
+## Запуск приложения (в режиме скрипта)
 
 ```identification_service.py``` - это вход в приложение. В ```test_identification_service.py``` описан пример работы со входом, который вы можете использовать.
 
 1. Подтяните зависимости из `requirements.txt`.
-2. Скачайте веса обученных моделей: `python -m utils.download_models`
-3. Заполните `config/config.yaml`.
+2. Заполните `config/config.yaml`.
 
+Пример скрипта взаимодействия с приложением.
+```python
+from services.identification_service import create_identification_service, setup
+
+setup(migrate=True)  # Запуск приложения
+service = create_identification_service()  # Запуск сервиса идентификации
+result = service.identify_and_prepare(
+    image_path="data/input/image.png",
+    top_k=5,
+    debug=True
+)  # Анализ
+
+print(result["candidates"])  # Кандидаты (самые похожие особи)
+if result['success']:
+    confirm = service.confirm_decision(
+        upload_id=result['upload_id'],
+        decision='CANCEL'
+    )  # Решение биолога
+```
 Если хотите запустить быстрый тест анализа, то можно использовать `tests/`.
 
-4. Запустите ```python -m tests.test_identification_service``` из корня репозитория. Начнётся процесс сегментации и идентификации с подтверждением.
-5. В выходных файлах в папке `data/cropped` появятся артефакты обработки (дебаг и сохранённые в базу кропы брюшек).
+В выходных файлах в папке `data/cropped` появляются артефакты обработки (дебаг и сохранённые в базу кропы брюшек).
 
-
-ВНИМАНИЕ: перед началом рекомендуется очистить базы данных по инструкциям ниже.
+Подробные возможности приложения описаны в `API.md`
 
 ВНИМАНИЕ: обучение YOLO и ViT обычно проходит не в данной ветке, а в ```test_version```.
 
-### Базы данных
+ВНИМАНИЕ: Если вы хотите обнулить все базы, то выполните следующие шаги: Удалите `database/cards.sqlite3` и `data/embeddings/database_embeddings.pkl`, очистите папки `data/cropped`.
 
-Существует две базы: `cards.sqlite3` и `database_embeddings.pkl` (faiss-index). В первой в таблице `cards` хранятся паспорта индивидуальных особей тритонов, в таблице `photos` карточки к каждой фотографии в базе и `embedding_index`, ссылающийся на индекс эмбеддинга в faiss-index, в таблице `uploads` хранятся незавершённые сохранения в бд, в `projects` - проекты (деление карточек на проекты). `cards` -> `photos` (1 ко многим, одна особь ко многим фото). В faiss-index хранятся только эмбеддинги для каждого фото.
+## Запуск API-сервиса
+...
 
-Схема sqlite-бд описана в cards_database.py. В `services/card_service.py` описаны взаимодействия с бд, в `services/embedding_service.py` - взаимодействия с FAISS-индексом.
-
-Если вы хотите обнулить все базы, то выполните следующие шаги:
-1. Удалите `database/cards.sqlite3` и `data/embeddings/database_embeddings.pkl`.
-2. Выполните `bash launch_db.sh`
-
-### Docker-контейнеризация
+## Docker-контейнеризация
 Контейнеры Docker не настроены.

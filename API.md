@@ -6,9 +6,10 @@
 ### Инициализация сервиса.
 
 ```python
-from services.identification_service import create_identification_service
+from services.identification_service import create_identification_service, setup
 
 # 1. Инициализация
+setup(migrate=False)  # Подгрузка моделей, поднятие баз данных, идемпотентно
 service = create_identification_service()
 ```
 ## Анализ

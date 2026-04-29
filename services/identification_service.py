@@ -38,7 +38,18 @@ from services.embedding_service import EmbeddingService
 from services.card_service import CardService, extract_prototype_id, form_card_id
 from services.upload_service import UploadService
 from services.project_service import ProjectService
-from database.card_database import DB_PATH
+
+from database.card_database import DB_PATH, init_database
+from database.build_faiss_index import build_faiss_index
+from database.migrate_dataset import migrate_dataset
+
+from config import load_config
+from services.embedding_service import EmbeddingService
+from services.card_service import CardService
+from services.upload_service import UploadService
+from services.project_service import ProjectService
+
+from utils.download_models import download_models_folder
 
 # =============================================================================
 # ЛОГГЕР
@@ -988,24 +999,31 @@ class IdentificationService:
 # Используйте фабрику для работы с идентификацией в целом.
 # =============================================================================
 
-def create_identification_service(config: Optional[Dict] = None) -> IdentificationService:
+def setup(migrate: bool = True):
+    """
+    Скачать модели и поднять базы данных.
+
+    Args:
+        migrate (bool): произвести миграцию датасета по умолчанию.
+    """
+    download_models_folder()
+    init_database()
+    if migrate:
+        migrate_dataset()
+    build_faiss_index()
+
+def create_identification_service() -> IdentificationService:
     """
     Создать IdentificationService со всеми зависимостями.
     
     Args:
-        config: Конфигурация (если None, загружается из config.yaml)
+        checkout (bool): проверяет веса моделей, базу данных и индекс
+        перед запуском. Создаёт их, если они отсутствуют.
     
     Returns:
         IdentificationService: Готовый к использованию сервис
     """
-    from config import load_config
-    from services.embedding_service import EmbeddingService
-    from services.card_service import CardService
-    from services.upload_service import UploadService
-    from services.project_service import ProjectService
-    
-    if config is None:
-        config = load_config()
+    config = load_config()
 
     DB_PATH = config.get('db', {}).get('db_path', 'database/cards.db')
     INDEX_PATH = config.get('db', {}).get('faiss_index_path', 'data/embeddings/database_embeddings.pkl')

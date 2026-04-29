@@ -5,6 +5,11 @@
     - ✅ projects таблица (id, name, description)
     - ✅ cards.project_id (FK → projects.id)
     - ✅ uploads.project_id (FK → projects.id)
+
+Изменения:
+    - ✅ Добавлена проверка фото на дубликаты (photo_exists)
+    - ✅ Скрипт идемпотентен: безопасно запускать повторно
+    - ✅ Не пропускает всю особь, если карточка уже есть, а проверяет каждое фото отдельно
 """
 
 import sqlite3
@@ -39,17 +44,14 @@ def get_connection():
 def get_or_create_project(cursor, project_name: str, description: str = None) -> int:
     """
     Получить ID проекта или создать новый.
-    
     ⚠️ Это вспомогательная функция для миграции, НЕ часть CRUD API.
     """
-    # Проверить существует ли проект
     cursor.execute('SELECT id FROM projects WHERE name = ?', (project_name,))
     row = cursor.fetchone()
     
     if row:
         return row['id']
     
-    # Создать новый проект
     cursor.execute('''
         INSERT INTO projects (name, description, created_at)
         VALUES (?, ?, ?)
@@ -60,13 +62,21 @@ def get_or_create_project(cursor, project_name: str, description: str = None) ->
 def individual_exists(cursor, card_id: str) -> bool:
     """Проверить, существует ли карточка в БД."""
     cursor.execute(
-        "SELECT card_id FROM cards WHERE card_id = ?",
+        "SELECT 1 FROM cards WHERE card_id = ?",
         (card_id,)
     )
     return cursor.fetchone() is not None
 
+def photo_exists(cursor, card_id: str, photo_path: str) -> bool:
+    """Проверить, существует ли фотография в БД для данной особи."""
+    cursor.execute(
+        "SELECT 1 FROM photos WHERE card_id = ? AND photo_path = ?",
+        (card_id, photo_path)
+    )
+    return cursor.fetchone() is not None
+
 def create_individual(cursor, card_id: str, species: str, project_id: int, template_type: str = DEFAULT_TEMPLATE):
-    """Создать запись о карточке особи."""
+    """Создать запись о карточке особи. (Идемпотентно благодаря INSERT OR IGNORE)"""
     cursor.execute('''
         INSERT OR IGNORE INTO cards
         (card_id, template_type, species, project_id, created_at)
@@ -103,7 +113,7 @@ def migrate_dataset() -> dict:
     conn = get_connection()
     cursor = conn.cursor()
     
-    # 🔥 Создать или получить проект (получаем project_id)
+    # 🔥 Создать или получить проект
     project_id = get_or_create_project(
         cursor,
         PROJECT_NAME,
@@ -114,6 +124,7 @@ def migrate_dataset() -> dict:
     total_cards = 0
     total_photos = 0
     skipped_cards = 0
+    skipped_photos = 0
     
     for species_key, config in SPECIES_CONFIG.items():
         species_folder = config["folder"]
@@ -138,31 +149,37 @@ def migrate_dataset() -> dict:
             animal_num = individual_folder.name
             card_id = f"NT-{species_prefix}-{animal_num}-{DEFAULT_TEMPLATE.replace('-', '')}"
             
-            if individual_exists(cursor, card_id):
-                print(f"   ⏭️ Пропущено: {card_id} (уже в БД)")
+            # ✅ Проверяем наличие карточки, но НЕ пропускаем фото, если она уже есть
+            card_exists = individual_exists(cursor, card_id)
+            if not card_exists:
+                create_individual(
+                    cursor=cursor,
+                    card_id=card_id,
+                    species=species_name,
+                    project_id=project_id
+                )
+                total_cards += 1
+                print(f"   ✅ Добавлена карточка: {card_id}")
+            else:
+                print(f"   ℹ️ Карточка {card_id} уже существует (проверяем фото)")
                 skipped_cards += 1
-                continue
-            
-            # 🔥 Используем project_id (FK)
-            create_individual(
-                cursor=cursor,
-                card_id=card_id,
-                species=species_name,
-                project_id=project_id  # ← FOREIGN KEY
-            )
-            total_cards += 1
-            print(f"   ✅ Добавлено: {card_id}")
             
             # Поиск фотографий
             photos = sorted(individual_folder.glob("*.jpg"))
-            if not photos:
-                photos = sorted(individual_folder.glob("*.jpeg"))
-            if not photos:
-                photos = sorted(individual_folder.glob("*.png"))
+            if not photos: photos = sorted(individual_folder.glob("*.jpeg"))
+            if not photos: photos = sorted(individual_folder.glob("*.png"))
             
-            print(f"      Фото найдено: {len(photos)}")
+            print(f"      Найдено фото: {len(photos)}")
             
             for idx, photo_path in enumerate(photos, 1):
+                photo_path_str = str(photo_path)
+                
+                # 🔥 Проверка на дубликат фото перед вставкой
+                if photo_exists(cursor, card_id, photo_path_str):
+                    print(f"      ⏭️ Пропущено фото: {photo_path.name}")
+                    skipped_photos += 1
+                    continue
+                
                 photo_number = f"{idx:02d}"
                 is_main = (idx == 1)
                 
@@ -175,6 +192,7 @@ def migrate_dataset() -> dict:
                     is_legacy=True
                 )
                 total_photos += 1
+                print(f"      ✅ Добавлено фото: {photo_path.name}")
             
             conn.commit()
     
@@ -185,12 +203,14 @@ def migrate_dataset() -> dict:
     print(f"   ✅ Карточек добавлено: {total_cards}")
     print(f"   ✅ Фото добавлено: {total_photos}")
     print(f"   ⏭️ Карточек пропущено: {skipped_cards}")
+    print(f"   ⏭️ Фото пропущено (уже в БД): {skipped_photos}")
     print("=" * 60)
     
     return {
         "cards_added": total_cards,
         "photos_added": total_photos,
-        "cards_skipped": skipped_cards
+        "cards_skipped": skipped_cards,
+        "photos_skipped": skipped_photos
     }
 
 def verify_migration():
@@ -199,7 +219,6 @@ def verify_migration():
     conn = get_connection()
     cursor = conn.cursor()
     
-    # Карточки по видам (через JOIN с projects)
     cursor.execute('''
         SELECT i.species, COUNT(*) as count, p.name as project_name
         FROM cards i
@@ -212,7 +231,6 @@ def verify_migration():
     for row in cursor.fetchall():
         print(f"   {row['species']} ({row['project_name']}): {row['count']}")
     
-    # Фотографии
     cursor.execute('''
         SELECT photo_type, is_legacy, COUNT(*) as count
         FROM photos
@@ -224,7 +242,6 @@ def verify_migration():
     for row in cursor.fetchall():
         print(f"   {row['photo_type']} (legacy={row['is_legacy']}): {row['count']}")
     
-    # Фото без эмбеддинга
     cursor.execute('''
         SELECT COUNT(*) as count
         FROM photos
@@ -233,7 +250,6 @@ def verify_migration():
     result = cursor.fetchone()
     print(f"\n⚠️ Фото без эмбеддинга: {result['count']}")
     
-    # Примеры ID
     cursor.execute('''
         SELECT i.card_id, p.name as project_name
         FROM cards i

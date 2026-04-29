@@ -1,6 +1,0 @@
-TODO для новой архитектуры перед интеграцией с API:
-[*] Адекватные пути сохранения фоток
-[*] Связать generete_card_id() в card_service.py с save_new_individual()
-[*] Очистка uploads в cards.db и проверка
-[*] Интерфейс добавления нового проекта (есть get_or_create_project в card_service)
-[*] Конфиги
