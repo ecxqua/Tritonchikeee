@@ -749,6 +749,8 @@ class CardService:
         ''', (card_id,))
         
         row = cursor.fetchone()
+        row = dict(row)
+        row['prototype_id'] = extract_prototype_id(card_id)
         conn.close()
         
         return filter_card_by_template(dict(row) if row else None)
