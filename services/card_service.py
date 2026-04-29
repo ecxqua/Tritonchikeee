@@ -88,7 +88,11 @@ def get_db_connection(db_path: str = DB_PATH) -> sqlite3.Connection:
     return conn
 
 # ВАЛИДАТОР
-def _validate_template_fields(template_type: str, card_data: dict) -> dict:
+def _validate_template_fields(
+        template_type: str,
+        card_data: dict,
+        require: bool = True
+    ) -> dict:
     """
     Валидатор. Проверяет наличие обязательных полей и отсутствие лишних для выбранного шаблона.
     Возвращает очищенный dict card_data (содержит только допустимые поля).
@@ -98,13 +102,14 @@ def _validate_template_fields(template_type: str, card_data: dict) -> dict:
         raise ValueError(f"Неизвестный тип шаблона: {template_type}")
 
     # 1. Проверка обязательных полей
-    required = REQUIRED_FIELDS.get(template_type, [])
-    missing = [f for f in required if f not in card_data or card_data.get(f) is None]
-    if missing:
-        raise ValueError(
-            f"Для шаблона '{template_type}' обязательны поля: {', '.join(missing)}\n"
-            f"Переданные данные: {list(card_data.keys())}"
-        )
+    if require:
+        required = REQUIRED_FIELDS.get(template_type, [])
+        missing = [f for f in required if f not in card_data or card_data.get(f) is None]
+        if missing:
+            raise ValueError(
+                f"Для шаблона '{template_type}' обязательны поля: {', '.join(missing)}\n"
+                f"Переданные данные: {list(card_data.keys())}"
+            )
 
     # 2. Проверка на лишние поля
     extra = [f for f in card_data.keys() if f not in allowed]
@@ -566,7 +571,7 @@ class CardService:
             return False
         # Валидация полей
         template_type: str = self.get_card(card_id)["template_type"]
-        card_data = _validate_template_fields(template_type, kwargs)
+        card_data = _validate_template_fields(template_type, kwargs, False)
         
         conn = get_db_connection(self.db_path)
         cursor = conn.cursor()
