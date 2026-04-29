@@ -2,9 +2,10 @@
 services/card_service.py — CRUD операции для карточек особей.
 
 Архитектурные принципы:
-    1. ✅ Только CRUD для cards и photos (проекты — в project_service.py)
-    2. ✅ Нет прямого доступа к FAISS → вызываем EmbeddingService
+    1. CRUD для cards и photos (проекты — в project_service.py)
+    2. Нет прямого доступа к FAISS → вызываем EmbeddingService
     3. Prototypes - особи, cards - карточки особей
+    4. Валидация полей карточек
 
 Зависимости:
     - database/cards.db — SQLite база
@@ -37,6 +38,8 @@ REQUIRED_FIELDS = {
     'КВ-1': ['status', 'water_body_number', 'length_body', 'length_tail'],
     'КВ-2': ['status', 'water_body_name']
 }
+
+BASE_FIELDS = {'card_id', 'template_type', 'species', 'territory', 'project_id', 'project_name', 'created_at'}
 
 ALLOWED_FIELDS = {
     'ИК-1': [
@@ -75,9 +78,10 @@ def get_db_connection(db_path: str = DB_PATH) -> sqlite3.Connection:
     conn.row_factory = sqlite3.Row
     return conn
 
+# ВАЛИДАТОР
 def _validate_template_fields(template_type: str, card_data: dict) -> dict:
     """
-    Проверяет наличие обязательных полей и отсутствие лишних для выбранного шаблона.
+    Валидатор. Проверяет наличие обязательных полей и отсутствие лишних для выбранного шаблона.
     Возвращает очищенный dict card_data (содержит только допустимые поля).
     """
     allowed = ALLOWED_FIELDS.get(template_type)
@@ -102,6 +106,24 @@ def _validate_template_fields(template_type: str, card_data: dict) -> dict:
         )
 
     # 3. Возвращаем только разрешённые поля (защита от SQL-инъекций/мусора)
+    return {k: v for k, v in card_data.items() if k in allowed}
+
+# ВАЛИДАТОР НА ЧТЕНИЕ
+def filter_card_by_template(
+        card_data: Optional[Dict[str, Any]]
+    ) -> Optional[Dict[str, Any]]:
+    """Валидтор на чтениею Фильтрует dict карточки, оставляя только системные
+    и разрешённые для шаблона поля."""
+    if not card_data:
+        return None
+        
+    template_type = card_data.get('template_type')
+    
+    # Безопасный fallback: если шаблон неизвестен, отдаём всё (например, для легаси-данных)
+    if template_type not in ALLOWED_FIELDS:
+        return card_data
+        
+    allowed = BASE_FIELDS | set(ALLOWED_FIELDS[template_type])
     return {k: v for k, v in card_data.items() if k in allowed}
 
 def get_next_prototype_number(cursor: sqlite3.Cursor, species: str) -> int:
@@ -706,11 +728,10 @@ class CardService:
         return photos
     
     def get_card(self, card_id: str) -> Optional[Dict[str, Any]]:
-        """Получает данные карточки по ID (с информацией о проекте)."""
+        """Получает данные карточки по ID, автоматически фильтруя поля по шаблону."""
         conn = get_db_connection(self.db_path)
         cursor = conn.cursor()
         
-        # JOIN с projects для получения названия проекта
         cursor.execute('''
             SELECT i.*, p.name as project_name
             FROM cards i
@@ -721,7 +742,7 @@ class CardService:
         row = cursor.fetchone()
         conn.close()
         
-        return dict(row) if row else None
+        return filter_card_by_template(dict(row) if row else None)
     
     def get_cards_by_project(self, project_id: int) -> List[Dict[str, Any]]:
         """Получает список карточек по проекту."""
@@ -763,20 +784,9 @@ class CardService:
         if not card_ids:
             return None
 
-        conn = get_db_connection(self.db_path)
-        cursor = conn.cursor()
-
-        placeholders = ','.join('?' for _ in card_ids)
-        cursor.execute(f'''
-            SELECT i.*, p.name as project_name
-            FROM cards i
-            LEFT JOIN projects p ON i.project_id = p.id
-            WHERE i.card_id IN ({placeholders})
-            ORDER BY i.template_type, i.created_at
-        ''', card_ids)
-        
-        cards = [dict(row) for row in cursor.fetchall()]
-        conn.close()
+        cards = list()
+        for card_id in card_ids:
+            cards.append(self.get_card(card_id))
 
         # Формируем агрегированный ответ
         # Берем общие поля из первой карточки (ожидается консистентность данных)
