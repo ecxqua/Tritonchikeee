@@ -5,7 +5,7 @@ import time
 # 1. Инициализация
 
 service = create_identification_service()
-
+service.refresh(confirm=True, remigrate=True)
 print("Старт обработки")
 start_time = time.time()
 
@@ -24,19 +24,19 @@ if result['success']:
     
     # 3. Пользователь видит кандидатов и принимает решение
     
-    # 4. Шаг 2: Подтверждение (НОВАЯ ОСОБЬ)
-    confirm = service.confirm_decision(
-        upload_id=result['upload_id'],
-        project_id=service.project_service.get_or_create_project("Новый"),
-        decision='NEW',
-        template_type="ИК-1",
-        species="Карелина",
-        **{
-            'length_body': 55,
-            'weight': 3.22,
-            'sex': 'М'
-        }
-    )
+    # # 4. Шаг 2: Подтверждение (НОВАЯ ОСОБЬ)
+    # confirm = service.confirm_decision(
+    #     upload_id=result['upload_id'],
+    #     project_id=service.project_service.get_or_create_project("Новый"),
+    #     decision='NEW',
+    #     template_type="ИК-1",
+    #     species="Карелина",
+    #     **{
+    #         'length_body': 55,
+    #         'weight': 3.22,
+    #         'sex': 'М'
+    #     }
+    # )
     # НЕВЕРНО
     # # Или (ПОВТОРНАЯ ВСТРЕЧА)
     # confirm = service.confirm_decision(
@@ -50,9 +50,9 @@ if result['success']:
     #     length_tail = 0.1
     # )
 
-    # confirm = service.confirm_decision(
-    #     upload_id=result['upload_id'],
-    #     decision='CANCEL'
-    # )
+    confirm = service.confirm_decision(
+        upload_id=result['upload_id'],
+        decision='CANCEL'
+    )
 
 print("Финальное время обработки: ", time.time() - start_time)
