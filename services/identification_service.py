@@ -136,6 +136,7 @@ class IdentificationService:
         clear_directory(FULL_DIR)
 
         setup(migrate=remigrate)
+        self.embedding_service.reload_index()
     
     # ==========================================================================
     # ШАГ 1: АНАЛИЗ + ПОДГОТОВКА
