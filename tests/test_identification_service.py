@@ -1,8 +1,9 @@
-from services.identification_service import create_identification_service
+from services.identification_service import create_identification_service, setup
 import time
 
 
 # 1. Инициализация
+
 service = create_identification_service()
 
 print("Старт обработки")
@@ -23,19 +24,20 @@ if result['success']:
     
     # 3. Пользователь видит кандидатов и принимает решение
     
-    # # 4. Шаг 2: Подтверждение (НОВАЯ ОСОБЬ)
-    # confirm = service.confirm_decision(
-    #     upload_id=result['upload_id'],
-    #     decision='NEW',
-    #     template_type="ИК-1",
-    #     species="Карелина",
-    #     **{
-    #         'length_body': 55,
-    #         'weight': 3.22,
-    #         'sex': 'М'
-    #     }
-    # )
-    
+    # 4. Шаг 2: Подтверждение (НОВАЯ ОСОБЬ)
+    confirm = service.confirm_decision(
+        upload_id=result['upload_id'],
+        project_id=service.project_service.get_or_create_project("Новый"),
+        decision='NEW',
+        template_type="ИК-1",
+        species="Карелина",
+        **{
+            'length_body': 55,
+            'weight': 3.22,
+            'sex': 'М'
+        }
+    )
+    # НЕВЕРНО
     # # Или (ПОВТОРНАЯ ВСТРЕЧА)
     # confirm = service.confirm_decision(
     #     upload_id=result['upload_id'],

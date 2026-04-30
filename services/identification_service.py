@@ -38,7 +38,19 @@ from services.embedding_service import EmbeddingService
 from services.card_service import CardService, extract_prototype_id, form_card_id
 from services.upload_service import UploadService
 from services.project_service import ProjectService
-from database.card_database import DB_PATH
+
+from database.card_database import DB_PATH, init_database
+from database.build_faiss_index import build_faiss_index
+from database.migrate_dataset import migrate_dataset
+
+from config import load_config
+from services.embedding_service import EmbeddingService
+from services.card_service import CardService
+from services.upload_service import UploadService
+from services.project_service import ProjectService
+
+from utils.download_models import download_models_folder
+from utils.dir_utils import delete_file, clear_directory
 
 # =============================================================================
 # ЛОГГЕР
@@ -103,6 +115,27 @@ class IdentificationService:
         self.transform = DEFAULT_TRANSFORM
         
         logger.info(f"IdentificationService инициализирован (device={self.device})")
+
+    def refresh(self, confirm: bool = False, remigrate: bool = False):
+        """Жёсткий перезапуск всех баз данных."""
+        if not confirm:
+            raise PermissionError("Перезапуск бд без подтверждения запрещён!")
+        DB_PATH = self.config.get('db', {}).get('db_path', 'database/cards.db')
+        INDEX_DIR = self.config.get('db', {}).get(
+            'faiss_index_dir', 'data/embeddings/'
+        )
+        CROPPED_DIR = self.config.get('db', {}).get(
+            'cropped_folder', 'data/embeddings/database_embeddings.pkl'
+        )
+        FULL_DIR = self.config.get('db', {}).get(
+            'full_folder', 'data/embeddings/database_embeddings.pkl'
+        )
+        delete_file(DB_PATH)
+        clear_directory(INDEX_DIR)
+        clear_directory(CROPPED_DIR)
+        clear_directory(FULL_DIR)
+
+        setup(migrate=remigrate)
     
     # ==========================================================================
     # ШАГ 1: АНАЛИЗ + ПОДГОТОВКА
@@ -140,7 +173,7 @@ class IdentificationService:
             Dict:
                 - upload_id: int (для confirm_decision)
                 - embedding: np.ndarray (вектор)
-                - crop_path: str (путь к кропу)
+                - crop_path: str (путь к кропу, ОСТОРОЖНО: временный путь)
                 - candidates: List[Dict] (топ-K похожих особей)
                 - success: bool
                 - error: str | None
@@ -554,6 +587,11 @@ class IdentificationService:
         }
         # Обработка
         if not process_result:
+            if not image_path:
+                raise ValueError(
+                    "Нет фото или результатов"
+                    " для обработки и добавления особи."
+                )
             process_result = self.get_crop_and_embedding(image_path)
             if process_result['error']:
                 result['error'] = process_result['error']
@@ -633,6 +671,11 @@ class IdentificationService:
         }
         # Обработка
         if not process_result:
+            if not image_path:
+                raise ValueError(
+                    "Нет фото или результатов"
+                    " для обработки и добавления особи."
+                )
             process_result = self.get_crop_and_embedding(image_path)
             if process_result['error']:
                 result['error'] = process_result['error']
@@ -828,9 +871,17 @@ class IdentificationService:
             result['error'] = "Не удалось обновить карточку особи"
             return result
 
+    def cleanup_expired_uploads(self) -> int:
+        """Очищает просроченные загрузки."""
+        return self.upload_service.cleanup(True)
+
+    def cleanup_uploads(self) -> int:
+        """Очищает все загрузки (полезно для защиты от рассинхрона)."""
+        return self.upload_service.cleanup(False)
+
     # ==========================================================================
     # ВНУТРЕННИЕ МЕТОДЫ
-    # Многие из них выенесены сюда, потому что они не совсем имеют место
+    # Многие из них вынеесены сюда, потому что они не совсем имеют место
     # в CRUD для бд или faiss. Это внутренняя логика идентификации типа построения
     # усреднённых эмбеддингов, обновления embedding_index для фото в photos
     # ==========================================================================
@@ -988,24 +1039,31 @@ class IdentificationService:
 # Используйте фабрику для работы с идентификацией в целом.
 # =============================================================================
 
-def create_identification_service(config: Optional[Dict] = None) -> IdentificationService:
+def setup(migrate: bool = True):
+    """
+    Скачать модели и поднять базы данных.
+
+    Args:
+        migrate (bool): произвести миграцию датасета по умолчанию.
+    """
+    download_models_folder()
+    init_database()
+    if migrate:
+        migrate_dataset()
+    build_faiss_index()
+
+def create_identification_service() -> IdentificationService:
     """
     Создать IdentificationService со всеми зависимостями.
     
     Args:
-        config: Конфигурация (если None, загружается из config.yaml)
+        checkout (bool): проверяет веса моделей, базу данных и индекс
+        перед запуском. Создаёт их, если они отсутствуют.
     
     Returns:
         IdentificationService: Готовый к использованию сервис
     """
-    from config import load_config
-    from services.embedding_service import EmbeddingService
-    from services.card_service import CardService
-    from services.upload_service import UploadService
-    from services.project_service import ProjectService
-    
-    if config is None:
-        config = load_config()
+    config = load_config()
 
     DB_PATH = config.get('db', {}).get('db_path', 'database/cards.db')
     INDEX_PATH = config.get('db', {}).get('faiss_index_path', 'data/embeddings/database_embeddings.pkl')
