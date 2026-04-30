@@ -3,7 +3,7 @@ import time
 
 
 # 1. Инициализация
-setup(migrate=True)
+
 service = create_identification_service()
 
 print("Старт обработки")
@@ -37,7 +37,7 @@ if result['success']:
             'sex': 'М'
         }
     )
-    
+    # НЕВЕРНО
     # # Или (ПОВТОРНАЯ ВСТРЕЧА)
     # confirm = service.confirm_decision(
     #     upload_id=result['upload_id'],

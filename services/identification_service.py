@@ -50,6 +50,7 @@ from services.upload_service import UploadService
 from services.project_service import ProjectService
 
 from utils.download_models import download_models_folder
+from utils.dir_utils import delete_file, clear_directory
 
 # =============================================================================
 # ЛОГГЕР
@@ -114,6 +115,27 @@ class IdentificationService:
         self.transform = DEFAULT_TRANSFORM
         
         logger.info(f"IdentificationService инициализирован (device={self.device})")
+
+    def refresh(self, confirm: bool = False, remigrate: bool = False):
+        """Жёсткий перезапуск всех баз данных."""
+        if not confirm:
+            raise PermissionError("Перезапуск бд без подтверждения запрещён!")
+        DB_PATH = self.config.get('db', {}).get('db_path', 'database/cards.db')
+        INDEX_DIR = self.config.get('db', {}).get(
+            'faiss_index_dir', 'data/embeddings/'
+        )
+        CROPPED_DIR = self.config.get('db', {}).get(
+            'cropped_folder', 'data/embeddings/database_embeddings.pkl'
+        )
+        FULL_DIR = self.config.get('db', {}).get(
+            'full_folder', 'data/embeddings/database_embeddings.pkl'
+        )
+        delete_file(DB_PATH)
+        clear_directory(INDEX_DIR)
+        clear_directory(CROPPED_DIR)
+        clear_directory(FULL_DIR)
+
+        setup(migrate=remigrate)
     
     # ==========================================================================
     # ШАГ 1: АНАЛИЗ + ПОДГОТОВКА
@@ -565,6 +587,11 @@ class IdentificationService:
         }
         # Обработка
         if not process_result:
+            if not image_path:
+                raise ValueError(
+                    "Нет фото или результатов"
+                    " для обработки и добавления особи."
+                )
             process_result = self.get_crop_and_embedding(image_path)
             if process_result['error']:
                 result['error'] = process_result['error']
@@ -644,6 +671,11 @@ class IdentificationService:
         }
         # Обработка
         if not process_result:
+            if not image_path:
+                raise ValueError(
+                    "Нет фото или результатов"
+                    " для обработки и добавления особи."
+                )
             process_result = self.get_crop_and_embedding(image_path)
             if process_result['error']:
                 result['error'] = process_result['error']
@@ -839,9 +871,17 @@ class IdentificationService:
             result['error'] = "Не удалось обновить карточку особи"
             return result
 
+    def cleanup_expired_uploads(self) -> int:
+        """Очищает просроченные загрузки."""
+        return self.upload_service.cleanup(True)
+
+    def cleanup_uploads(self) -> int:
+        """Очищает все загрузки (полезно для защиты от рассинхрона)."""
+        return self.upload_service.cleanup(False)
+
     # ==========================================================================
     # ВНУТРЕННИЕ МЕТОДЫ
-    # Многие из них выенесены сюда, потому что они не совсем имеют место
+    # Многие из них вынеесены сюда, потому что они не совсем имеют место
     # в CRUD для бд или faiss. Это внутренняя логика идентификации типа построения
     # усреднённых эмбеддингов, обновления embedding_index для фото в photos
     # ==========================================================================

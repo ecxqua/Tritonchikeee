@@ -29,6 +29,7 @@ id-model:
 # Конфигурация бд и faiss.
 db:
   db_path: "database/cards.db"
+  faiss_index_dir: "data/embeddings/"
   faiss_index_path: "data/embeddings/database_embeddings.pkl"
   cropped_folder: "data/cropped/"
   full_folder: "data/full/"
