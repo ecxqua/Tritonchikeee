@@ -6,15 +6,12 @@ import {
   getNewtHistory,
   updateNewtCardApi
 } from "@/lib/api";
-import { useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
-import { ArrowLeft, Save, Link as LinkIcon } from "lucide-react";
-import { format } from "date-fns";
-import { ru } from "date-fns/locale";
+import { ArrowLeft, Save, Trash2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { PhotoGallery } from "@/components/photo-gallery";
 
@@ -22,7 +19,6 @@ export function NewtDetail() {
   const params = useParams();
   const newtId = params.newtId || "";
   const { toast } = useToast();
-  const queryClient = useQueryClient();
 
   const [newt, setNewt] = useState<Newt | null>(null);
   const [cards, setCards] = useState<NewtCard[]>([]);
@@ -33,6 +29,7 @@ export function NewtDetail() {
   const [historyLoading, setHistoryLoading] = useState(true);
 
   const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const [editData, setEditData] = useState<Record<number, Record<string, any>>>({});
@@ -103,17 +100,33 @@ export function NewtDetail() {
     key: string,
     label: string,
     value: any,
-    type = "text"
+    type = "text",
+    isParentId = false
   ) => {
     const isEditing = editingIndex === index;
 
     if (!isEditing) {
+      const displayValue = value || "—";
+      const canLinkParent =
+        isParentId &&
+        typeof value === "string" &&
+        value.trim() !== "" &&
+        value !== "данные отсутствуют";
+
       return (
         <div className="py-3 border-b last:border-0 border-border/50">
           <dt className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-1">
             {label}
           </dt>
-          <dd className="text-sm font-medium">{value || "—"}</dd>
+          <dd className="text-sm font-medium">
+            {canLinkParent ? (
+              <Link href={`/newts/${value}`}>
+                <span className="text-primary underline cursor-pointer">{displayValue}</span>
+              </Link>
+            ) : (
+              displayValue
+            )}
+          </dd>
         </div>
       );
     }
@@ -147,7 +160,10 @@ export function NewtDetail() {
     const commonFields = (
       <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8">
         <div className="space-y-0">
+          {renderField(index, "species", "Вид", data?.species)}
           {renderField(index, "dateFilled", "Дата заполнения", data?.dateFilled, "date")}
+          {renderField(index, "conditionalBirthDate", "Условный год рождения", data?.conditionalBirthDate)}
+          {renderField(index, "exactBirthDate", "Точная дата рождения", data?.exactBirthDate, "date")}
           {renderField(index, "bodyLength", "Длина тела (L), мм", data?.bodyLength, "number")}
           {renderField(index, "tailLength", "Длина хвоста (Lcd), мм", data?.tailLength, "number")}
           {renderField(index, "weight", "Вес (г)", data?.weight, "number")}
@@ -155,6 +171,13 @@ export function NewtDetail() {
         </div>
 
         <div className="space-y-0">
+          {renderField(index, "photoNumber", "Номер фото", data?.photoNumber)}
+          {renderField(index, "regionOfOrigin", "Регион происхождения", data?.regionOfOrigin)}
+          {renderField(index, "releaseDate", "Дата выпуска", data?.releaseDate, "date")}
+          {renderField(index, "fatherId", "ID отца", data?.fatherId, "text", true)}
+          {renderField(index, "motherId", "ID матери", data?.motherId, "text", true)}
+          {renderField(index, "measurementDevice", "Измерительный прибор", data?.measurementDevice)}
+          {renderField(index, "scaleBrand", "Марка весов", data?.scaleBrand)}
           {renderField(index, "notes", "Примечания", data?.notes)}
         </div>
       </div>
@@ -182,6 +205,37 @@ export function NewtDetail() {
                 Редактировать
               </Button>
             )}
+            <Button
+              variant="destructive"
+              disabled={deleting || saving}
+              onClick={async () => {
+                const cardNumber = index + 1;
+                if (!window.confirm(`Вы точно хотите удалить карточку №${cardNumber} (${card.cardType})? Это действие необратимо.`)) return;
+                setDeleting(true);
+                try {
+                  const config = await window.api.getConfig();
+                  const res = await fetch(`${config.apiBaseUrl}/newts/${newtId}/card?cardType=${encodeURIComponent(card.cardType)}`, {
+                    method: "DELETE",
+                  });
+
+                  if (!res.ok) {
+                    throw new Error(`Delete card failed: ${res.status}`);
+                  }
+
+                  setCards((prev) => prev.filter((_, i) => i !== index));
+                  toast({ title: "Карточка удалена" });
+                } catch {
+                  toast({
+                    title: "Не удалось удалить карточку. Возможно, endpoint не реализован на backend.",
+                    variant: "destructive",
+                  });
+                } finally {
+                  setDeleting(false);
+                }
+              }}
+            >
+              <Trash2 className="w-4 h-4 mr-2" /> Удалить карточку
+            </Button>
           </div>
         </CardHeader>
 
@@ -231,6 +285,37 @@ export function NewtDetail() {
             {cards.map(c => c.cardType).join(", ")}
           </div>
         </div>
+        <Button
+          variant="destructive"
+          disabled={deleting || saving}
+          onClick={async () => {
+            if (!window.confirm(`Вы точно хотите удалить особь ${newt.id}? Это действие необратимо.`)) return;
+
+            setDeleting(true);
+            try {
+              const config = await window.api.getConfig();
+              const res = await fetch(`${config.apiBaseUrl}/newts/${newtId}`, {
+                method: "DELETE",
+              });
+
+              if (!res.ok) {
+                throw new Error(`Delete newt failed: ${res.status}`);
+              }
+
+              toast({ title: "Особь удалена" });
+              window.history.back();
+            } catch {
+              toast({
+                title: "Не удалось удалить особь. Возможно, endpoint не реализован на backend.",
+                variant: "destructive",
+              });
+            } finally {
+              setDeleting(false);
+            }
+          }}
+        >
+          <Trash2 className="w-4 h-4 mr-2" /> Удалить особь
+        </Button>
       </div>
 
       <div className="space-y-6">

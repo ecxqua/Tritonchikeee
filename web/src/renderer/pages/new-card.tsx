@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from "react";
 import { useLocation, useSearch } from "wouter";
-import { createCardApi, listProjects } from "@/lib/api";
+import { createCardApi, listNewts, listProjects } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -25,6 +25,8 @@ function dataURLtoFile(dataurl: string, filename: string): File {
   return new File([u8arr], filename, { type: mime });
 }
 
+type CardType = "ИК-1" | "ИК-2" | "КВ-1" | "КВ-2";
+
 export function NewCard() {
   const [, setLocation] = useLocation();
   const searchString = useSearch();
@@ -33,16 +35,48 @@ export function NewCard() {
 
   const { toast } = useToast();
   
-  const [cardType, setCardType] = useState<"ИК-1" | "ИК-2" | "КВ-1" | "КВ-2">("ИК1");
+  const today = new Date().toISOString().split("T")[0];
+  const [cardType, setCardType] = useState<CardType>("ИК-1");
   const [projectId, setProjectId] = useState<string>(defaultProjectId ? defaultProjectId.toString() : "none");
   const [data, setData] = useState<Record<string, any>>({});
   const [photos, setPhotos] = useState<string[]>([]);
   
   const [projects, setProjects] = useState<{ id: number; name: string }[]>([]);
+  const [registeredIds, setRegisteredIds] = useState<string[]>([]);
   const [isSaving, setIsSaving] = useState(false);
+  const [regionMode, setRegionMode] = useState<"preset" | "custom">("preset");
+  const [customRegion, setCustomRegion] = useState("");
+
+  const commonRegions = [
+    "Московская область",
+    "Ленинградская область",
+    "Тверская область",
+    "Калужская область",
+    "Ярославская область",
+  ];
 
   useEffect(() => {
-    listProjects().then(setProjects);
+    const loadData = async () => {
+      const projectList = await listProjects();
+      setProjects(projectList);
+
+      const idsByProject = await Promise.all(
+        projectList.map(async (project) => {
+          try {
+            const newts = await listNewts({ projectId: project.id });
+            return newts.map((n) => n.id);
+          } catch {
+            return [];
+          }
+        }),
+      );
+
+      setRegisteredIds(Array.from(new Set(idsByProject.flat())).sort());
+    };
+
+    loadData().catch(() => {
+      setRegisteredIds([]);
+    });
   }, []);
 
   const handlePhotosChange = useCallback((newPhotos: string[]) => {
@@ -57,6 +91,26 @@ export function NewCard() {
     setIsSaving(true);
 
     try {
+      const preparedData = {
+        ...data,
+        exactBirthDate: data.exactBirthDate || data.conditionalBirthDate || "стандарт",
+        measurementDevice: data.measurementDevice || "стандарт",
+        scaleBrand: data.scaleBrand || "стандарт",
+        notes: data.notes || "нет примечаний",
+      };
+
+      const missingField = getRequiredFieldsForCard(cardType).find(
+        ({ key }) => !preparedData[key] || String(preparedData[key]).trim() === "",
+      );
+
+      if (missingField) {
+        toast({
+          title: `Заполните обязательное поле: ${missingField.label}`,
+          variant: "destructive",
+        });
+        return;
+      }
+
       if (photos.length === 0) {
         toast({ title: "Добавьте хотя бы одно фото", variant: "destructive" });
         return;
@@ -74,7 +128,7 @@ export function NewCard() {
         files,
         data: {
           idNumber: id,
-          ...data,
+          ...preparedData,
         },
       });
 
@@ -97,8 +151,121 @@ export function NewCard() {
   };
 
   const updateField = (field: string, value: string) => {
-    setData(prev => ({ ...prev, [field]: value }));
+    setData((prev) => ({ ...prev, [field]: value }));
   };
+
+  const getRequiredFieldsForCard = (type: CardType) => {
+    if (type === "ИК-1") {
+      return [
+        { key: "species", label: "Вид" },
+        { key: "dateFilled", label: "Дата заполнения карточки" },
+        { key: "bodyLength", label: "Длина тела" },
+        { key: "tailLength", label: "Длина хвоста" },
+        { key: "conditionalBirthDate", label: "Условный год рождения" },
+        { key: "photoNumber", label: "Номер фото" },
+        { key: "regionOfOrigin", label: "Регион происхождения" },
+      ];
+    }
+    if (type === "ИК-2") {
+      return [
+        { key: "species", label: "Вид" },
+        { key: "dateFilled", label: "Дата заполнения карточки" },
+        { key: "releaseDate", label: "Дата выпуска в водоем" },
+        { key: "fatherId", label: "ID самца (родитель)" },
+        { key: "motherId", label: "ID самки (родитель)" },
+        { key: "totalLength", label: "Общая длина (L+Lcd), см" },
+        { key: "weight", label: "Масса, г" },
+        { key: "waterBodyName", label: "Название водоема" },
+      ];
+    }
+    if (type === "КВ-1") {
+      return [
+        { key: "species", label: "Вид" },
+        { key: "encounterDate", label: "Дата встречи" },
+        { key: "encounterTime", label: "Время встречи" },
+        { key: "bodyLength", label: "Длина тела" },
+        { key: "tailLength", label: "Длина хвоста" },
+        { key: "weight", label: "Масса, г" },
+        { key: "sex", label: "Пол" },
+        { key: "bellyPhotoNumber", label: "Номер фото брюшной стороны" },
+        { key: "status", label: "Статус" },
+        { key: "waterBodyNumber", label: "Номер водоема" },
+      ];
+    }
+    return [
+      { key: "species", label: "Вид" },
+      { key: "encounterDate", label: "Дата встречи" },
+      { key: "encounterTime", label: "Время встречи" },
+      { key: "totalLength", label: "Общая длина (L+Lcd), см" },
+      { key: "status", label: "Статус" },
+      { key: "waterBodyName", label: "Название водоема" },
+    ];
+  };
+
+  const resetDataForCardType = (type: CardType) => {
+    setRegionMode("preset");
+    setCustomRegion("");
+    if (type === "ИК-1") {
+      return {
+        species: "тритон карелина",
+        dateFilled: today,
+        bodyLength: "70",
+        tailLength: "40",
+        weight: "30",
+        sex: "",
+        exactBirthDate: "",
+        conditionalBirthDate: "",
+        photoNumber: "",
+        regionOfOrigin: "Московская область",
+        measurementDevice: "стандарт",
+        scaleBrand: "стандарт",
+        notes: "нет примечаний",
+      };
+    }
+    if (type === "ИК-2") {
+      return {
+        species: "тритон карелина",
+        dateFilled: today,
+        releaseDate: today,
+        fatherId: "данные отсутствуют",
+        motherId: "данные отсутствуют",
+        totalLength: "",
+        weight: "30",
+        waterBodyName: "",
+        notes: "нет примечаний",
+      };
+    }
+    if (type === "КВ-1") {
+      return {
+        species: "тритон карелина",
+        encounterDate: today,
+        encounterTime: "",
+        bodyLength: "70",
+        tailLength: "40",
+        weight: "30",
+        sex: "",
+        bellyPhotoNumber: "",
+        status: "",
+        waterBodyNumber: "",
+        measurementDevice: "стандарт",
+        scaleBrand: "стандарт",
+        notes: "нет примечаний",
+      };
+    }
+    return {
+      species: "тритон карелина",
+      encounterDate: today,
+      encounterTime: "",
+      totalLength: "",
+      status: "",
+      waterBodyName: "",
+      notes: "нет примечаний",
+    };
+  };
+
+  useEffect(() => {
+    setData(resetDataForCardType("ИК-1"));
+  }, []);
 
   const renderFields = () => {
     const commonFields = (
@@ -108,83 +275,191 @@ export function NewCard() {
       </div>
     );
 
+    const speciesField = (
+      <div className="space-y-2">
+        <Label>Вид *</Label>
+        <Select value={data.species || "тритон карелина"} onValueChange={(val) => updateField("species", val)}>
+          <SelectTrigger><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="тритон карелина">Тритон Карелина</SelectItem>
+            <SelectItem value="ребристый">Ребристый</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+    );
+
+    const parentField = (kind: "father" | "mother") => {
+      const key = kind === "father" ? "fatherId" : "motherId";
+      const label = kind === "father" ? "ID самца (родитель) *" : "ID самки (родитель) *";
+      const currentValue = (data[key] || "") as string;
+      const filteredIds = registeredIds
+        .filter((id) => id.toLowerCase().includes(currentValue.toLowerCase()))
+        .slice(0, 20);
+
+      return (
+        <div className="space-y-2">
+          <Label>{label}</Label>
+          <Input
+            value={currentValue}
+            placeholder="Введите ID или выберите ниже"
+            onChange={(e) => updateField(key, e.target.value)}
+          />
+          <div className="max-h-32 overflow-y-auto rounded border p-2 space-y-1 bg-muted/20">
+            <Button type="button" variant="outline" size="sm" className="w-full justify-start" onClick={() => updateField(key, "данные отсутствуют")}>
+              данные отсутствуют
+            </Button>
+            {filteredIds.map((id) => (
+              <Button
+                key={`${key}-${id}`}
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="w-full justify-start"
+                onClick={() => updateField(key, id)}
+              >
+                {id}
+              </Button>
+            ))}
+          </div>
+        </div>
+      );
+    };
+
     if (cardType === "ИК-1") {
       return (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           {commonFields}
-          <div className="space-y-2"><Label>Дата заполнения</Label><Input type="date" onChange={e => updateField("dateFilled", e.target.value)} /></div>
-          <div className="space-y-2"><Label>Точная дата рождения</Label><Input type="date" onChange={e => updateField("exactBirthDate", e.target.value)} /></div>
-          <div className="space-y-2"><Label>Длина тела (L), мм</Label><Input type="number" onChange={e => updateField("bodyLength", e.target.value)} /></div>
-          <div className="space-y-2"><Label>Длина хвоста (Lcd), мм</Label><Input type="number" onChange={e => updateField("tailLength", e.target.value)} /></div>
-          <div className="space-y-2"><Label>Вес (г)</Label><Input type="number" onChange={e => updateField("weight", e.target.value)} /></div>
-          <div className="space-y-2"><Label>Пол</Label><Input onChange={e => updateField("sex", e.target.value)} /></div>
-          <div className="space-y-2"><Label>Регион происхождения</Label><Input onChange={e => updateField("regionOfOrigin", e.target.value)} /></div>
-          <div className="space-y-2"><Label>Измерительный прибор</Label><Input onChange={e => updateField("measurementDevice", e.target.value)} /></div>
-          <div className="space-y-2"><Label>Марка весов</Label><Input onChange={e => updateField("scaleBrand", e.target.value)} /></div>
-          <div className="space-y-2 col-span-full"><Label>Примечания</Label><Textarea onChange={e => updateField("notes", e.target.value)} /></div>
-        </div>
-      );
-    } else if (cardType === "ИК-2") {
-      return (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          {commonFields}
-          <div className="space-y-2"><Label>Дата заполнения</Label><Input type="date" onChange={e => updateField("dateFilled", e.target.value)} /></div>
-          <div className="space-y-2"><Label>Дата выпуска</Label><Input type="date" onChange={e => updateField("releaseDate", e.target.value)} /></div>
-          <div className="space-y-2"><Label>ID Отца</Label><Input onChange={e => updateField("fatherId", e.target.value)} /></div>
-          <div className="space-y-2"><Label>ID Матери</Label><Input onChange={e => updateField("motherId", e.target.value)} /></div>
-          <div className="space-y-2"><Label>Общая длина (L+Lcd), см</Label><Input type="number" onChange={e => updateField("totalLength", e.target.value)} /></div>
-          <div className="space-y-2"><Label>Вес (г)</Label><Input type="number" onChange={e => updateField("weight", e.target.value)} /></div>
-          <div className="space-y-2 col-span-full"><Label>Название водоема</Label><Input onChange={e => updateField("waterBodyName", e.target.value)} /></div>
-          <div className="space-y-2 col-span-full"><Label>Примечания</Label><Textarea onChange={e => updateField("notes", e.target.value)} /></div>
-        </div>
-      );
-    } else if (cardType === "КВ-1") {
-      return (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          {commonFields}
-          <div className="space-y-2"><Label>Дата встречи</Label><Input type="date" onChange={e => updateField("encounterDate", e.target.value)} /></div>
-          <div className="space-y-2"><Label>Время встречи</Label><Input type="time" onChange={e => updateField("encounterTime", e.target.value)} /></div>
-          <div className="space-y-2"><Label>Длина тела (L), мм</Label><Input type="number" onChange={e => updateField("bodyLength", e.target.value)} /></div>
-          <div className="space-y-2"><Label>Длина хвоста (Lcd), мм</Label><Input type="number" onChange={e => updateField("tailLength", e.target.value)} /></div>
-          <div className="space-y-2"><Label>Вес (г)</Label><Input type="number" onChange={e => updateField("weight", e.target.value)} /></div>
-          <div className="space-y-2"><Label>Пол</Label><Input onChange={e => updateField("sex", e.target.value)} /></div>
-          <div className="space-y-2"><Label>Номер фото брюшка</Label><Input onChange={e => updateField("bellyPhotoNumber", e.target.value)} /></div>
-          <div className="space-y-2"><Label>Статус</Label>
-            <Select onValueChange={val => updateField("status", val)}>
-              <SelectTrigger><SelectValue placeholder="Выберите статус" /></SelectTrigger>
+          {speciesField}
+          <div className="space-y-2"><Label>Дата заполнения карточки *</Label><Input type="date" value={data.dateFilled || today} onChange={(e) => updateField("dateFilled", e.target.value)} /></div>
+          <div className="space-y-2"><Label>Длина тела (L), мм *</Label><Input type="number" value={data.bodyLength || "70"} onChange={(e) => updateField("bodyLength", e.target.value)} /></div>
+          <div className="space-y-2"><Label>Длина хвоста (Lcd), мм *</Label><Input type="number" value={data.tailLength || "40"} onChange={(e) => updateField("tailLength", e.target.value)} /></div>
+          <div className="space-y-2"><Label>Масса, г.</Label><Input type="number" value={data.weight || "30"} onChange={(e) => updateField("weight", e.target.value)} /></div>
+          <div className="space-y-2"><Label>Пол</Label>
+            <Select value={data.sex || ""} onValueChange={(val) => updateField("sex", val)}>
+              <SelectTrigger><SelectValue placeholder="Выберите пол" /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="alive">Жив</SelectItem>
-                <SelectItem value="dead">Мертв</SelectItem>
+                <SelectItem value="мужской">Мужской</SelectItem>
+                <SelectItem value="женский">Женский</SelectItem>
               </SelectContent>
             </Select>
           </div>
-          <div className="space-y-2"><Label>Номер водоема</Label><Input onChange={e => updateField("waterBodyNumber", e.target.value)} /></div>
-          <div className="space-y-2"><Label>Измерительный прибор</Label><Input onChange={e => updateField("measurementDevice", e.target.value)} /></div>
-          <div className="space-y-2"><Label>Марка весов</Label><Input onChange={e => updateField("scaleBrand", e.target.value)} /></div>
-          <div className="space-y-2 col-span-full"><Label>Примечания</Label><Textarea onChange={e => updateField("notes", e.target.value)} /></div>
-        </div>
-      );
-    } else {
-      return (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          {commonFields}
-          <div className="space-y-2"><Label>Дата встречи</Label><Input type="date" onChange={e => updateField("encounterDate", e.target.value)} /></div>
-          <div className="space-y-2"><Label>Время встречи</Label><Input type="time" onChange={e => updateField("encounterTime", e.target.value)} /></div>
-          <div className="space-y-2"><Label>Общая длина (L+Lcd), см</Label><Input type="number" onChange={e => updateField("totalLength", e.target.value)} /></div>
-          <div className="space-y-2"><Label>Статус</Label>
-            <Select onValueChange={val => updateField("status", val)}>
-              <SelectTrigger><SelectValue placeholder="Выберите статус" /></SelectTrigger>
+          <div className="space-y-2"><Label>Точный год рождения (дд.мм.гггг)</Label><Input placeholder="дд.мм.гггг" value={data.exactBirthDate || ""} onChange={(e) => updateField("exactBirthDate", e.target.value)} /></div>
+          <div className="space-y-2"><Label>Условный год рождения (дд.мм.гггг) *</Label><Input placeholder="дд.мм.гггг" value={data.conditionalBirthDate || ""} onChange={(e) => updateField("conditionalBirthDate", e.target.value)} /></div>
+          <div className="space-y-2"><Label>Номер фото индивидуального рисунка *</Label><Input value={data.photoNumber || ""} onChange={(e) => updateField("photoNumber", e.target.value)} /></div>
+          <div className="space-y-2">
+            <Label>Регион происхождения особи *</Label>
+            <Select
+              value={regionMode === "custom" ? "custom" : (data.regionOfOrigin || "Московская область")}
+              onValueChange={(val) => {
+                if (val === "custom") {
+                  setRegionMode("custom");
+                  updateField("regionOfOrigin", customRegion);
+                } else {
+                  setRegionMode("preset");
+                  updateField("regionOfOrigin", val);
+                }
+              }}
+            >
+              <SelectTrigger><SelectValue /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="alive">Жив</SelectItem>
-                <SelectItem value="dead">Мертв</SelectItem>
+                {commonRegions.map((region) => (
+                  <SelectItem key={region} value={region}>{region}</SelectItem>
+                ))}
+                <SelectItem value="custom">Другое (ввести вручную)</SelectItem>
               </SelectContent>
             </Select>
+            {regionMode === "custom" && (
+              <Input
+                placeholder="Введите регион"
+                value={customRegion}
+                onChange={(e) => {
+                  setCustomRegion(e.target.value);
+                  updateField("regionOfOrigin", e.target.value);
+                }}
+              />
+            )}
           </div>
-          <div className="space-y-2 col-span-full"><Label>Название водоема</Label><Input onChange={e => updateField("waterBodyName", e.target.value)} /></div>
-          <div className="space-y-2 col-span-full"><Label>Примечания</Label><Textarea onChange={e => updateField("notes", e.target.value)} /></div>
+          <div className="space-y-2"><Label>Марка устройства для измерения длины</Label><Input value={data.measurementDevice || "стандарт"} onChange={(e) => updateField("measurementDevice", e.target.value)} /></div>
+          <div className="space-y-2"><Label>Марка весов</Label><Input value={data.scaleBrand || "стандарт"} onChange={(e) => updateField("scaleBrand", e.target.value)} /></div>
+          <div className="space-y-2 col-span-full"><Label>Примечания</Label><Textarea value={data.notes || "нет примечаний"} onChange={(e) => updateField("notes", e.target.value)} /></div>
         </div>
       );
     }
+
+    if (cardType === "ИК-2") {
+      return (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          {commonFields}
+          {speciesField}
+          <div className="space-y-2"><Label>Дата заполнения карточки *</Label><Input type="date" value={data.dateFilled || today} onChange={(e) => updateField("dateFilled", e.target.value)} /></div>
+          <div className="space-y-2"><Label>Дата выпуска в водоем *</Label><Input type="date" value={data.releaseDate || today} onChange={(e) => updateField("releaseDate", e.target.value)} /></div>
+          {parentField("father")}
+          {parentField("mother")}
+          <div className="space-y-2"><Label>Общая длина (L+Lcd), см *</Label><Input type="number" value={data.totalLength || ""} onChange={(e) => updateField("totalLength", e.target.value)} /></div>
+          <div className="space-y-2"><Label>Масса, г. *</Label><Input type="number" value={data.weight || "30"} onChange={(e) => updateField("weight", e.target.value)} /></div>
+          <div className="space-y-2 col-span-full"><Label>Название водоема *</Label><Input value={data.waterBodyName || ""} onChange={(e) => updateField("waterBodyName", e.target.value)} /></div>
+          <div className="space-y-2 col-span-full"><Label>Примечания</Label><Textarea value={data.notes || "нет примечаний"} onChange={(e) => updateField("notes", e.target.value)} /></div>
+        </div>
+      );
+    }
+
+    if (cardType === "КВ-1") {
+      return (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          {commonFields}
+          {speciesField}
+          <div className="space-y-2"><Label>Дата встречи (дд.мм.гггг) *</Label><Input type="date" value={data.encounterDate || today} onChange={(e) => updateField("encounterDate", e.target.value)} /></div>
+          <div className="space-y-2"><Label>Время встречи *</Label><Input type="time" value={data.encounterTime || ""} onChange={(e) => updateField("encounterTime", e.target.value)} /></div>
+          <div className="space-y-2"><Label>Длина тела (L), мм *</Label><Input type="number" value={data.bodyLength || "70"} onChange={(e) => updateField("bodyLength", e.target.value)} /></div>
+          <div className="space-y-2"><Label>Длина хвоста (Lcd), мм *</Label><Input type="number" value={data.tailLength || "40"} onChange={(e) => updateField("tailLength", e.target.value)} /></div>
+          <div className="space-y-2"><Label>Масса, г. *</Label><Input type="number" value={data.weight || "30"} onChange={(e) => updateField("weight", e.target.value)} /></div>
+          <div className="space-y-2"><Label>Пол *</Label>
+            <Select value={data.sex || ""} onValueChange={(val) => updateField("sex", val)}>
+              <SelectTrigger><SelectValue placeholder="Выберите пол" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="мужской">Мужской</SelectItem>
+                <SelectItem value="женский">Женский</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-2"><Label>Номер фото брюшной стороны *</Label><Input value={data.bellyPhotoNumber || ""} onChange={(e) => updateField("bellyPhotoNumber", e.target.value)} /></div>
+          <div className="space-y-2"><Label>Статус (жив/мертв) *</Label>
+            <Select value={data.status || ""} onValueChange={(val) => updateField("status", val)}>
+              <SelectTrigger><SelectValue placeholder="Выберите статус" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="alive">Жив</SelectItem>
+                <SelectItem value="dead">Мертв</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-2"><Label>Номер водоема *</Label><Input value={data.waterBodyNumber || ""} onChange={(e) => updateField("waterBodyNumber", e.target.value)} /></div>
+          <div className="space-y-2"><Label>Марка устройства для измерения длины</Label><Input value={data.measurementDevice || "стандарт"} onChange={(e) => updateField("measurementDevice", e.target.value)} /></div>
+          <div className="space-y-2"><Label>Марка весов</Label><Input value={data.scaleBrand || "стандарт"} onChange={(e) => updateField("scaleBrand", e.target.value)} /></div>
+          <div className="space-y-2 col-span-full"><Label>Примечания</Label><Textarea value={data.notes || "нет примечаний"} onChange={(e) => updateField("notes", e.target.value)} /></div>
+        </div>
+      );
+    }
+
+    return (
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        {commonFields}
+        {speciesField}
+        <div className="space-y-2"><Label>Дата встречи (дд.мм.гггг) *</Label><Input type="date" value={data.encounterDate || today} onChange={(e) => updateField("encounterDate", e.target.value)} /></div>
+        <div className="space-y-2"><Label>Время встречи *</Label><Input type="time" value={data.encounterTime || ""} onChange={(e) => updateField("encounterTime", e.target.value)} /></div>
+        <div className="space-y-2"><Label>Общая длина (L+Lcd), см *</Label><Input type="number" value={data.totalLength || ""} onChange={(e) => updateField("totalLength", e.target.value)} /></div>
+        <div className="space-y-2"><Label>Статус (жив/мертв) *</Label>
+          <Select value={data.status || ""} onValueChange={(val) => updateField("status", val)}>
+            <SelectTrigger><SelectValue placeholder="Выберите статус" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="alive">Жив</SelectItem>
+              <SelectItem value="dead">Мертв</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="space-y-2 col-span-full"><Label>Название водоема *</Label><Input value={data.waterBodyName || ""} onChange={(e) => updateField("waterBodyName", e.target.value)} /></div>
+        <div className="space-y-2 col-span-full"><Label>Примечания</Label><Textarea value={data.notes || "нет примечаний"} onChange={(e) => updateField("notes", e.target.value)} /></div>
+      </div>
+    );
   };
 
   return (
@@ -206,7 +481,7 @@ export function NewCard() {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div className="space-y-2">
               <Label>Тип карточки</Label>
-              <Select value={cardType} onValueChange={(val: any) => { setCardType(val); setData({}); }}>
+              <Select value={cardType} onValueChange={(val: any) => { setCardType(val); setData(resetDataForCardType(val)); }}>
                 <SelectTrigger className="bg-background">
                   <SelectValue />
                 </SelectTrigger>
