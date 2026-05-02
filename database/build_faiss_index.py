@@ -16,6 +16,7 @@ import torch.nn as nn
 import faiss
 import cv2
 import numpy as np
+import yaml
 from tqdm import tqdm
 from torchvision import transforms
 from PIL import Image
@@ -25,7 +26,10 @@ from database.card_database import DB_PATH
 sys.path.append(str(Path(__file__).parent.parent))
 from pipeline.deployment_dinov2_faiss import load_model, get_embedding_from_array
 
-MODEL_PATH = Path("models/dinov2_prod_30e/best.pt")
+# Загрузить MODEL_PATH из конфига
+with open("config/config.yaml", "r", encoding="utf-8") as f:
+    config = yaml.safe_load(f)
+MODEL_PATH = Path(config["id-model"]["path"])
 FAISS_INDEX_PATH = Path("data/embeddings/database_embeddings.pkl")
 
 # Параметры
