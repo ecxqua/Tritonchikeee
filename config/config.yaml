@@ -22,7 +22,7 @@ seg-model:
 
 # Конфигурация модели идентификации.
 id-model:
-  path: "models/dinov2_embedding/best.pt"
+  path: "models/best.pt"
   embedding_dim: 512
   droupout_rate: 0.4
 
