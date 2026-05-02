@@ -2,9 +2,10 @@
 services/card_service.py — CRUD операции для карточек особей.
 
 Архитектурные принципы:
-    1. ✅ Только CRUD для cards и photos (проекты — в project_service.py)
-    2. ✅ Нет прямого доступа к FAISS → вызываем EmbeddingService
+    1. CRUD для cards и photos (проекты — в project_service.py)
+    2. Нет прямого доступа к FAISS → вызываем EmbeddingService
     3. Prototypes - особи, cards - карточки особей
+    4. Валидация полей карточек
 
 Зависимости:
     - database/cards.db — SQLite база
@@ -38,6 +39,38 @@ REQUIRED_FIELDS = {
     'КВ-2': ['status', 'water_body_name']
 }
 
+BASE_FIELDS = {
+    'card_id',
+    'prototype_id',
+    'template_type',
+    'species',
+    'territory',
+    'project_id',
+    'project_name',
+    'created_at'
+}
+
+ALLOWED_FIELDS = {
+    'ИК-1': [
+        'date', 'length_body', 'weight', 'sex',
+        'birth_year_exact', 'birth_year_approx', 
+        'origin_region', 'length_device', 'weight_device', 'notes'
+    ],
+    'ИК-2': [
+        'date', 'release_date', 'parent_male_id', 'parent_female_id',
+        'length_total', 'weight', 'water_body_name', 'notes'
+    ],
+    'КВ-1': [
+        'date', 'meeting_time', 'length_body', 'length_tail',
+        'weight', 'sex', 'status', 'water_body_number',
+        'length_device', 'weight_device', 'notes'
+    ],
+    'КВ-2': [
+        'date', 'meeting_time', 'length_total',
+        'status', 'water_body_name', 'notes'
+    ]
+}
+
 SPECIES_PREFIX = {
     'Карелина': 'K',
     'Гребенчатый': 'R',
@@ -54,15 +87,58 @@ def get_db_connection(db_path: str = DB_PATH) -> sqlite3.Connection:
     conn.row_factory = sqlite3.Row
     return conn
 
-def _validate_template_fields(template_type: str, card_data: dict) -> None:
-    """Проверяет наличие обязательных полей для выбранного шаблона."""
-    required = REQUIRED_FIELDS.get(template_type, [])
-    missing = [field for field in required if card_data.get(field) is None]
-    if missing:
+# ВАЛИДАТОР
+def _validate_template_fields(
+        template_type: str,
+        card_data: dict,
+        require: bool = True
+    ) -> dict:
+    """
+    Валидатор. Проверяет наличие обязательных полей и отсутствие лишних для выбранного шаблона.
+    Возвращает очищенный dict card_data (содержит только допустимые поля).
+    """
+    allowed = ALLOWED_FIELDS.get(template_type)
+    if allowed is None:
+        raise ValueError(f"Неизвестный тип шаблона: {template_type}")
+
+    # 1. Проверка обязательных полей
+    if require:
+        required = REQUIRED_FIELDS.get(template_type, [])
+        missing = [f for f in required if f not in card_data or card_data.get(f) is None]
+        if missing:
+            raise ValueError(
+                f"Для шаблона '{template_type}' обязательны поля: {', '.join(missing)}\n"
+                f"Переданные данные: {list(card_data.keys())}"
+            )
+
+    # 2. Проверка на лишние поля
+    extra = [f for f in card_data.keys() if f not in allowed]
+    if extra:
         raise ValueError(
-            f"Для шаблона '{template_type}' обязательны поля: {', '.join(missing)}\n"
-            f"Переданные данные: {list(card_data.keys())}"
+            f"Шаблон '{template_type}' не поддерживает следующие поля: {', '.join(extra)}\n"
+            f"Допустимые поля: {allowed}"
         )
+
+    # 3. Возвращаем только разрешённые поля (защита от SQL-инъекций/мусора)
+    return {k: v for k, v in card_data.items() if k in allowed}
+
+# ВАЛИДАТОР НА ЧТЕНИЕ
+def filter_card_by_template(
+        card_data: Optional[Dict[str, Any]]
+    ) -> Optional[Dict[str, Any]]:
+    """Валидтор на чтениею Фильтрует dict карточки, оставляя только системные
+    и разрешённые для шаблона поля."""
+    if not card_data:
+        return None
+        
+    template_type = card_data.get('template_type')
+    
+    # Безопасный fallback: если шаблон неизвестен, отдаём всё (например, для легаси-данных)
+    if template_type not in ALLOWED_FIELDS:
+        return card_data
+        
+    allowed = BASE_FIELDS | set(ALLOWED_FIELDS[template_type])
+    return {k: v for k, v in card_data.items() if k in allowed}
 
 def get_next_prototype_number(cursor: sqlite3.Cursor, species: str) -> int:
     """Возвращает следующий порядковый номер для животного данного вида."""
@@ -230,7 +306,7 @@ class CardService:
             "success": False,
             "error": None
         }
-        _validate_template_fields(template_type, card_data)
+        card_data = _validate_template_fields(template_type, card_data)
         
         conn = get_db_connection(self.db_path)
         cursor = conn.cursor()
@@ -425,7 +501,7 @@ class CardService:
         if template_type not in ['КВ-1', 'КВ-2']:
             raise ValueError("Для добавления встречи используйте шаблоны КВ-1 или КВ-2")
         
-        _validate_template_fields(template_type, card_data)
+        card_data = _validate_template_fields(template_type, card_data)
 
         # Правильно генерируем ID новой особи.
         # NT-K-13 -> NT-K-13-КВ1
@@ -493,12 +569,15 @@ class CardService:
         if not kwargs:
             logger.warning("Нет полей для обновления")
             return False
+        # Валидация полей
+        template_type: str = self.get_card(card_id)["template_type"]
+        card_data = _validate_template_fields(template_type, kwargs, False)
         
         conn = get_db_connection(self.db_path)
         cursor = conn.cursor()
         
-        fields = [f"{key} = ?" for key in kwargs.keys()]
-        values = list(kwargs.values()) + [card_id]
+        fields = [f"{key} = ?" for key in card_data.keys()]
+        values = list(card_data.values()) + [card_id]
         
         query = f"UPDATE cards SET {', '.join(fields)} WHERE card_id = ?"
         cursor.execute(query, values)
@@ -663,11 +742,10 @@ class CardService:
         return photos
     
     def get_card(self, card_id: str) -> Optional[Dict[str, Any]]:
-        """Получает данные карточки по ID (с информацией о проекте)."""
+        """Получает данные карточки по ID, автоматически фильтруя поля по шаблону."""
         conn = get_db_connection(self.db_path)
         cursor = conn.cursor()
         
-        # JOIN с projects для получения названия проекта
         cursor.execute('''
             SELECT i.*, p.name as project_name
             FROM cards i
@@ -676,9 +754,11 @@ class CardService:
         ''', (card_id,))
         
         row = cursor.fetchone()
+        row = dict(row)
+        row['prototype_id'] = extract_prototype_id(card_id)
         conn.close()
         
-        return dict(row) if row else None
+        return filter_card_by_template(dict(row) if row else None)
     
     def get_cards_by_project(self, project_id: int) -> List[Dict[str, Any]]:
         """Получает список карточек по проекту."""
@@ -720,20 +800,9 @@ class CardService:
         if not card_ids:
             return None
 
-        conn = get_db_connection(self.db_path)
-        cursor = conn.cursor()
-
-        placeholders = ','.join('?' for _ in card_ids)
-        cursor.execute(f'''
-            SELECT i.*, p.name as project_name
-            FROM cards i
-            LEFT JOIN projects p ON i.project_id = p.id
-            WHERE i.card_id IN ({placeholders})
-            ORDER BY i.template_type, i.created_at
-        ''', card_ids)
-        
-        cards = [dict(row) for row in cursor.fetchall()]
-        conn.close()
+        cards = list()
+        for card_id in card_ids:
+            cards.append(self.get_card(card_id))
 
         # Формируем агрегированный ответ
         # Берем общие поля из первой карточки (ожидается консистентность данных)

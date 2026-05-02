@@ -6,10 +6,14 @@
 ### Инициализация сервиса.
 
 ```python
-from services.identification_service import create_identification_service
+from services.identification_service import create_identification_service, setup
 
 # 1. Инициализация
+setup(migrate=False)  # Подгрузка моделей, поднятие баз данных, идемпотентно
 service = create_identification_service()
+
+# Обнуление баз данных и перезагрузка
+service.refresh(confirm=True)
 ```
 ## Анализ
 ### Старт анализа фотографии
@@ -273,11 +277,6 @@ result = project_service.delete_project(
 Больше методов в `services/project_service.py`
 
 ## Управление загрузками
-```python
-upload_service = service.upload_service
-# Получаем подсерсив работы с проектами
-# Криво я знаю Т_Т
-```
 Между шагами 1 и 2 анализа в таблице `uploads` лежат незавершённые операции - загрузки.
 
 ### Очистка просроченных загрузок
@@ -288,5 +287,6 @@ upload_service = service.upload_service
 Записи о завершении и отмене не затрагиваются (логгирование?)
 
 ```python
-expired_count = upload_service.cleanup_expired()
+expired_count = service.cleanup_expired_uploads()
+deleted_count = service.cleanup_uploads()
 ```

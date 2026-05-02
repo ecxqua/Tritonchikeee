@@ -1,10 +1,11 @@
-from services.identification_service import create_identification_service
+from services.identification_service import create_identification_service, setup
 import time
 
 
 # 1. Инициализация
-service = create_identification_service()
 
+service = create_identification_service()
+service.refresh(confirm=True, remigrate=True)
 print("Старт обработки")
 start_time = time.time()
 
@@ -26,6 +27,7 @@ if result['success']:
     # # 4. Шаг 2: Подтверждение (НОВАЯ ОСОБЬ)
     # confirm = service.confirm_decision(
     #     upload_id=result['upload_id'],
+    #     project_id=service.project_service.get_or_create_project("Новый"),
     #     decision='NEW',
     #     template_type="ИК-1",
     #     species="Карелина",
@@ -35,7 +37,7 @@ if result['success']:
     #         'sex': 'М'
     #     }
     # )
-    
+    # НЕВЕРНО
     # # Или (ПОВТОРНАЯ ВСТРЕЧА)
     # confirm = service.confirm_decision(
     #     upload_id=result['upload_id'],
@@ -48,9 +50,9 @@ if result['success']:
     #     length_tail = 0.1
     # )
 
-    # confirm = service.confirm_decision(
-    #     upload_id=result['upload_id'],
-    #     decision='CANCEL'
-    # )
+    confirm = service.confirm_decision(
+        upload_id=result['upload_id'],
+        decision='CANCEL'
+    )
 
 print("Финальное время обработки: ", time.time() - start_time)

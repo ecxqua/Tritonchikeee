@@ -18,6 +18,8 @@ from pathlib import Path
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any, List
 
+from utils.dir_utils import delete_file
+
 from database.card_database import DB_PATH
 
 logger = logging.getLogger(__name__)
@@ -215,30 +217,69 @@ class UploadService:
         finally:
             conn.close()
     
-    def cleanup_expired(self) -> int:
-        """DELETE: Удалить просроченные загрузки."""
+    def cleanup(self, expired: bool = True) -> int:
+        """DELETE: Удалить все/просроченные загрузки и ассоциированные файлы."""
         conn = get_db_connection(self.db_path)
         cursor = conn.cursor()
         
         try:
             now = datetime.now().isoformat()
             
-            cursor.execute('''
-                DELETE FROM uploads
-                WHERE status = 'pending' AND expires_at < ?
-            ''', (now,))
+            # 1. Сначала получаем пути к файлам, которые будем удалять
+            cond = ""
+            if expired:
+                cond = '''
+                    SELECT id, file_path FROM uploads
+                    WHERE status = 'pending' AND expires_at < ?
+                '''
+                cursor.execute(cond, (now,))
+            else:
+                cond = '''
+                    SELECT id, file_path FROM uploads
+                '''
+                cursor.execute(cond)
             
-            deleted_count = cursor.rowcount
+            expired_uploads = cursor.fetchall()
+            
+            if not expired_uploads:
+                return 0
+            
+            # 2. Удаляем файлы с диска
+            deleted_files = 0
+            for upload_id, file_path in expired_uploads:
+                try:
+                    if delete_file(file_path):
+                        deleted_files += 1
+                        logger.debug(f"Файл удалён: {file_path}")
+                    else:
+                        logger.warning(f"Файл не найден или не удалён: {file_path}")
+                except Exception as e:
+                    logger.error(f"Ошибка при удалении файла {file_path}: {e}")
+                    # Не прерываем очистку — продолжаем с остальными
+            
+            # 3. Удаляем записи из БД
+            cond = ""
+            if expired:
+                cond = '''
+                    DELETE FROM uploads
+                    WHERE status = 'pending' AND expires_at < ?
+                '''
+                cursor.execute(cond, (now,))
+            else:
+                cond = '''
+                    DELETE FROM uploads
+                '''
+                cursor.execute(cond)
+            
+            deleted_db = cursor.rowcount
             conn.commit()
             
-            if deleted_count > 0:
-                logger.info(f"Очистка: удалено {deleted_count} просроченных загрузок")
-            
-            return deleted_count
+            logger.info(f"Очистка: удалено {deleted_files} файлов, {deleted_db} записей из БД")
+            return deleted_db
             
         except Exception as e:
             conn.rollback()
-            logger.error(f"Ошибка очистки загрузок: {e}")
+            logger.error(f"Критическая ошибка очистки загрузок: {e}")
             raise e
         finally:
             conn.close()
