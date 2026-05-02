@@ -22,9 +22,9 @@ seg-model:
 
 # Конфигурация модели идентификации.
 id-model:
-  path: "models/best_model.pth"
-  embedding_dim: 512  # Неактивно
-  droupout_rate: 0.4  # Неактивно
+  path: "models/best.pt"
+  embedding_dim: 512
+  droupout_rate: 0.4
 
 # Конфигурация бд и faiss.
 db:

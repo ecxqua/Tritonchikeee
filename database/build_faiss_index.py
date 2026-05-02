@@ -1,6 +1,6 @@
 """
 🦎 Построение FAISS индекса для идентификации тритонов
-Использует модель EnhancedTripletNet из pipeline/deployment_vit.py
+Использует модель DINOv2 из pipeline/deployment_dinov2_faiss.py
 
 🔥 MIGRATION: Использует IndexIDMap для поддержки удаления по photo_id
 🔥 DRY: get_embedding_from_array — единственный источник истины для preprocessing
@@ -16,6 +16,7 @@ import torch.nn as nn
 import faiss
 import cv2
 import numpy as np
+import yaml
 from tqdm import tqdm
 from torchvision import transforms
 from PIL import Image
@@ -23,9 +24,12 @@ from database.card_database import DB_PATH
 
 # Добавляем pipeline в путь для импорта
 sys.path.append(str(Path(__file__).parent.parent))
-from pipeline.deployment_vit_faiss import EnhancedTripletNet, load_model, get_embedding_from_array
+from pipeline.deployment_dinov2_faiss import load_model, get_embedding_from_array
 
-MODEL_PATH = Path("models/best_model.pth")
+# Загрузить MODEL_PATH из конфига
+with open("config/config.yaml", "r", encoding="utf-8") as f:
+    config = yaml.safe_load(f)
+MODEL_PATH = Path(config["id-model"]["path"])
 FAISS_INDEX_PATH = Path("data/embeddings/database_embeddings.pkl")
 
 # Параметры
@@ -74,7 +78,7 @@ def get_embeddings_batch(model, transform, photos, device, batch_size=BATCH_SIZE
     Гарантирует идентичность пайплайна: BGR→RGB, трансформы, инференс — всё как в продакшене.
     
     Args:
-        model: Загруженная модель ViT
+        model: Загруженная модель DINOv2
         transform: Трансформы для предобработки
         photos: Список dict с ключом 'photo_path'
         device: Устройство для вычислений

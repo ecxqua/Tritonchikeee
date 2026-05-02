@@ -4,7 +4,7 @@ services/identification_service.py — Оркестратор идентифик
 Это главный вход в приложение для идентификации.
 
 АРХИТЕКТУРНЫЕ ПРИНЦИПЫ:
-    1. Единый вход для анализа (YOLO + ViT + FAISS + Upload)
+    1. Единый вход для анализа (YOLO + DINOv2 + FAISS + Upload)
     2. Two-Phase Commit: identify_and_prepare() → confirm_decision()
     3. Прототипы (усреднённые эмбеддинги) вычисляются здесь
     4. EmbeddingService — только хранение/поиск векторов
@@ -14,7 +14,7 @@ services/identification_service.py — Оркестратор идентифик
 
 Зависимости:
     - pipeline/deployment_yolo_new.py — сегментация
-    - pipeline/deployment_vit_faiss.py — ViT модель
+    - pipeline/deployment_dinov2_faiss.py — DINOv2 модель (замена старого ViT)
     - services/embedding_service.py — FAISS операции
     - services/card_service.py — CRUD карточек
     - services/upload_service.py — временные загрузки
@@ -33,7 +33,7 @@ import cv2
 import sqlite3
 
 from pipeline.deployment_yolo_new import process_single_image_sync
-from pipeline.deployment_vit_faiss import load_model, get_embedding, EnhancedTripletNet, DEFAULT_TRANSFORM, search_vectors
+from pipeline.deployment_dinov2_faiss import load_model, get_embedding, get_embedding_from_array, DEFAULT_TRANSFORM, search_vectors
 from services.embedding_service import EmbeddingService
 from services.card_service import CardService, extract_prototype_id, form_card_id
 from services.upload_service import UploadService
@@ -1012,15 +1012,16 @@ class IdentificationService:
             return []
         
         # Поиск через pipeline (чистая математика)
-        results = search_vectors(
+        top_indices, top_distances = search_vectors(
             query_embedding=query_embedding,
-            reference_embeddings=prototypes['embeddings'],
+            index_embeddings=prototypes['embeddings'],
             top_k=top_k
         )
         
         # Обогатить метаданными
         candidates = []
-        for idx, similarity in results:
+        for idx, distance in zip(top_indices, top_distances):
+            similarity = float(-distance)
             ind_id = prototypes['prototype_ids'][idx]
             meta = prototypes['metadata'].get(ind_id, {})
             
