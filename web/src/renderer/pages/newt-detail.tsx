@@ -157,31 +157,85 @@ export function NewtDetail() {
   const renderCard = (card: NewtCard, index: number) => {
     const data = editingIndex === index ? editData[index] : card.data;
 
-    const commonFields = (
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8">
-        <div className="space-y-0">
-          {renderField(index, "species", "Вид", data?.species)}
-          {renderField(index, "dateFilled", "Дата заполнения", data?.dateFilled, "date")}
-          {renderField(index, "conditionalBirthDate", "Условный год рождения", data?.conditionalBirthDate)}
-          {renderField(index, "exactBirthDate", "Точная дата рождения", data?.exactBirthDate, "date")}
-          {renderField(index, "bodyLength", "Длина тела (L), мм", data?.bodyLength, "number")}
-          {renderField(index, "tailLength", "Длина хвоста (Lcd), мм", data?.tailLength, "number")}
-          {renderField(index, "weight", "Вес (г)", data?.weight, "number")}
-          {renderField(index, "sex", "Пол", data?.sex)}
-        </div>
+    const renderFieldsForCardType = () => {
+      if (card.cardType === "ИК-1") {
+        return (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8">
+            <div className="space-y-0">
+              {renderField(index, "dateFilled", "Дата заполнения карточки", data?.dateFilled, "date")}
+              {renderField(index, "exactBirthDate", "Точная дата рождения особи", data?.exactBirthDate, "date")}
+              {renderField(index, "bodyLength", "Длина тела (L), мм", data?.bodyLength, "number")}
+              {renderField(index, "tailLength", "Длина хвоста (Lcd), мм", data?.tailLength, "number")}
+              {renderField(index, "weight", "Вес (г)", data?.weight, "number")}
+            </div>
+            <div className="space-y-0">
+              {renderField(index, "sex", "Пол", data?.sex)}
+              {renderField(index, "regionOfOrigin", "Регион происхождения", data?.regionOfOrigin)}
+              {renderField(index, "measurementDevice", "Измерительный прибор", data?.measurementDevice)}
+              {renderField(index, "scaleBrand", "Марка весов", data?.scaleBrand)}
+              {renderField(index, "notes", "Примечания", data?.notes)}
+            </div>
+          </div>
+        );
+      }
 
-        <div className="space-y-0">
-          {renderField(index, "photoNumber", "Номер фото", data?.photoNumber)}
-          {renderField(index, "regionOfOrigin", "Регион происхождения", data?.regionOfOrigin)}
-          {renderField(index, "releaseDate", "Дата выпуска", data?.releaseDate, "date")}
-          {renderField(index, "fatherId", "ID отца", data?.fatherId, "text", true)}
-          {renderField(index, "motherId", "ID матери", data?.motherId, "text", true)}
-          {renderField(index, "measurementDevice", "Измерительный прибор", data?.measurementDevice)}
-          {renderField(index, "scaleBrand", "Марка весов", data?.scaleBrand)}
-          {renderField(index, "notes", "Примечания", data?.notes)}
+      if (card.cardType === "ИК-2") {
+        return (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8">
+            <div className="space-y-0">
+              {renderField(index, "dateFilled", "Дата заполнения", data?.dateFilled, "date")}
+              {renderField(index, "releaseDate", "Дата выпуска в водоём", data?.releaseDate, "date")}
+              {renderField(index, "fatherId", "ID отца", data?.fatherId, "text", true)}
+              {renderField(index, "motherId", "ID матери", data?.motherId, "text", true)}
+            </div>
+            <div className="space-y-0">
+              {renderField(index, "totalLength", "Общая длина (L+Lcd), см", data?.totalLength, "number")}
+              {renderField(index, "weight", "Вес (г)", data?.weight, "number")}
+              {renderField(index, "waterBodyName", "Название водоема", data?.waterBodyName)}
+              {renderField(index, "notes", "Примечания", data?.notes)}
+            </div>
+          </div>
+        );
+      }
+
+      if (card.cardType === "КВ-1") {
+        return (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8">
+            <div className="space-y-0">
+              {renderField(index, "encounterDate", "Дата встречи", data?.encounterDate, "date")}
+              {renderField(index, "encounterTime", "Время встречи", data?.encounterTime, "time")}
+              {renderField(index, "bodyLength", "Длина тела (L), мм", data?.bodyLength, "number")}
+              {renderField(index, "tailLength", "Длина хвоста (Lcd), мм", data?.tailLength, "number")}
+              {renderField(index, "weight", "Вес (г)", data?.weight, "number")}
+            </div>
+            <div className="space-y-0">
+              {renderField(index, "sex", "Пол", data?.sex)}
+              {renderField(index, "bellyPhotoNumber", "Номер фото брюшка", data?.bellyPhotoNumber)}
+              {renderField(index, "status", "Статус", data?.status)}
+              {renderField(index, "waterBodyNumber", "Номер водоема", data?.waterBodyNumber)}
+              {renderField(index, "measurementDevice", "Измерительный прибор", data?.measurementDevice)}
+              {renderField(index, "scaleBrand", "Марка весов", data?.scaleBrand)}
+              {renderField(index, "notes", "Примечания", data?.notes)}
+            </div>
+          </div>
+        );
+      }
+
+      return (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8">
+          <div className="space-y-0">
+            {renderField(index, "encounterDate", "Дата встречи", data?.encounterDate, "date")}
+            {renderField(index, "encounterTime", "Время встречи", data?.encounterTime, "time")}
+            {renderField(index, "totalLength", "Общая длина (L+Lcd), см", data?.totalLength, "number")}
+          </div>
+          <div className="space-y-0">
+            {renderField(index, "status", "Статус", data?.status)}
+            {renderField(index, "waterBodyName", "Название водоема", data?.waterBodyName)}
+            {renderField(index, "notes", "Примечания", data?.notes)}
+          </div>
         </div>
-      </div>
-    );
+      );
+    };
 
     return (
       <Card key={index}>
@@ -240,7 +294,7 @@ export function NewtDetail() {
         </CardHeader>
 
         <CardContent className="p-6 space-y-6">
-          {commonFields}
+          {renderFieldsForCardType()}
 
           <div className="pt-4 border-t">
             <PhotoGallery

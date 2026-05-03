@@ -1,4 +1,4 @@
-import { recognizeNewt, listProjects } from "@/lib/api";
+import { recognizeNewt, listProjects, getNewt, getNewtCards } from "@/lib/api";
 import { useEffect, useState, useRef } from "react";
 import { Link } from "wouter";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -17,6 +17,9 @@ export function Recognize() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [expandedNewtId, setExpandedNewtId] = useState<string | null>(null);
+  const [newtSummaryById, setNewtSummaryById] = useState<
+    Record<string, { isLoading: boolean; projectId?: string; sex?: string; status?: string; cardTypes: string[] }>
+  >({});
 
   const [result, setResult] = useState<any>(null);
   const [isPending, setIsPending] = useState(false);
@@ -63,6 +66,34 @@ export function Recognize() {
 
     setResult(res);
     setIsPending(false);
+  };
+
+  const loadNewtSummary = async (newtId: string) => {
+    if (newtSummaryById[newtId]) return;
+
+    setNewtSummaryById(prev => ({
+      ...prev,
+      [newtId]: { isLoading: true, cardTypes: [] },
+    }));
+
+    try {
+      const [newt, cards] = await Promise.all([getNewt(newtId), getNewtCards(newtId)]);
+      setNewtSummaryById(prev => ({
+        ...prev,
+        [newtId]: {
+          isLoading: false,
+          projectId: newt?.projectId,
+          sex: newt?.sex,
+          status: newt?.status,
+          cardTypes: cards.map(c => c.cardType),
+        },
+      }));
+    } catch {
+      setNewtSummaryById(prev => ({
+        ...prev,
+        [newtId]: { isLoading: false, cardTypes: [] },
+      }));
+    }
   };
 
   return (
@@ -222,7 +253,13 @@ export function Recognize() {
                         <div key={i}>
                           <div
                             className="p-4 hover:bg-muted/10 transition-colors flex items-center gap-4 cursor-pointer"
-                            onClick={() => setExpandedNewtId(expandedNewtId === String(match.newtId) ? null : String(match.newtId))}
+                            onClick={() => {
+                              const nextId = expandedNewtId === String(match.newtId) ? null : String(match.newtId);
+                              setExpandedNewtId(nextId);
+                              if (nextId) {
+                                void loadNewtSummary(nextId);
+                              }
+                            }}
                           >
                             <div className="w-14 h-14 rounded overflow-hidden bg-black/10 shrink-0 border border-border/50">
                               <img src={match.photoUrl || "https://placehold.co/100x100?text=?"} alt="Match" className="w-full h-full object-cover" />
@@ -245,6 +282,32 @@ export function Recognize() {
                           </div>
                           {expandedNewtId === String(match.newtId) && (
                             <div className="px-4 pb-4 bg-muted/5 border-t">
+                              <div className="rounded-md border bg-background p-3 mb-3">
+                                <p className="text-xs text-muted-foreground mb-2">Общая информация о карте:</p>
+                                {newtSummaryById[String(match.newtId)]?.isLoading ? (
+                                  <p className="text-sm text-muted-foreground">Загрузка...</p>
+                                ) : (
+                                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
+                                    <div>
+                                      <span className="text-muted-foreground">ID:</span> {match.newtId}
+                                    </div>
+                                    <div>
+                                      <span className="text-muted-foreground">Типы карточек:</span>{" "}
+                                      {newtSummaryById[String(match.newtId)]?.cardTypes.join(", ") || "—"}
+                                    </div>
+                                    <div>
+                                      <span className="text-muted-foreground">Проект:</span>{" "}
+                                      {newtSummaryById[String(match.newtId)]?.projectId || "—"}
+                                    </div>
+                                    <div>
+                                      <span className="text-muted-foreground">Пол / статус:</span>{" "}
+                                      {(newtSummaryById[String(match.newtId)]?.sex || "—") +
+                                        " / " +
+                                        (newtSummaryById[String(match.newtId)]?.status || "—")}
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
                               <p className="text-xs text-muted-foreground py-2 mb-2">Фотографии особи {match.newtId}:</p>
                               <PhotoGallery newtId={String(match.newtId)} editable={false} />
                               <Link href={`/newts/${match.newtId}`}>
