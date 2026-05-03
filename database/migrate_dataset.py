@@ -168,6 +168,9 @@ def migrate_dataset() -> dict:
             photos = sorted(individual_folder.glob("*.jpg"))
             if not photos: photos = sorted(individual_folder.glob("*.jpeg"))
             if not photos: photos = sorted(individual_folder.glob("*.png"))
+            if not photos: photos = sorted(individual_folder.glob("*.JPG"))
+            if not photos: photos = sorted(individual_folder.glob("*.JPEG"))
+            if not photos: photos = sorted(individual_folder.glob("*.PNG"))
             
             print(f"      Найдено фото: {len(photos)}")
             
