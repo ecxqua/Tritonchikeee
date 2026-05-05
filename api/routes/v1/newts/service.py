@@ -22,12 +22,12 @@ def get_newt_by_id(
     last = cards[-1]
 
     return {
-        "id": proto["prototype_id"],
-        "projectId": proto["project_id"],
-        "cardType": last["template_type"],
-        "createdAt": first["created_at"],
-        "sex": first["sex"],
-        "status": first["status"]
+        "id": proto.get("prototype_id", None),
+        "projectId": proto.get("project_id", None),
+        "cardType": last.get("template_type", None),
+        "createdAt": first.get("created_at", None),
+        "sex": first.get("sex", None),
+        "status": first.get("status", None),
     }
 
 
@@ -65,6 +65,8 @@ def get_cards_by_newt_id(
         first_photo: Dict[str, Any] = {}
         if photo_objs:
             first_photo = photo_objs[0]
+
+        print(f"Looking at {card=}")
 
         result.append({
             "cardType": card["template_type"],
@@ -108,9 +110,79 @@ def patch_card_by_newt_id(
         raise APIError(status=404, msg=f"No prototype by ID {id}")
 
     card = sorted(proto["cards"], key=lambda c: c["created_at"])[0]
-    card_id = card["card_id"]
+    template_type = params["cardType"]
+    submission_id = f"{id}-{template_type.replace('-', '')}"
 
-    if not id_service.card_service._update_card(card_id, **params):
+    filtered_params = {
+	key: value
+	for key, value in params.items()
+	if key not in card or card[key] != value or not value
+    }
+
+    for key in [  # cleanup & extract later
+	"cardType", "photoNumber"
+    ]:
+        filtered_params.pop(key)
+
+    new_params = {
+	k: v for k, v in {
+            "date": filtered_params.get("dateFilled", None),
+            "length_body": filtered_params.get("bodyLength", None),
+            "length_tail": filtered_params.get("tailLength", None),
+            "weight": filtered_params.get("weight", None),
+            "sex": filtered_params.get("sex", None),
+            "birth_year_exact": filtered_params.get("exactBirthDate", None),
+            "birth_year_approx": filtered_params.get("estimatedBirthDate", None),
+            "photo_number": filtered_params.get("photoNumber", None),
+            "origin_region": filtered_params.get("regionOfOrigin", None),
+            "length_device": filtered_params.get("measurementDevice", None),
+            "weight_device": filtered_params.get("scaleBrand", None),
+            "notes": filtered_params.get("notes", None),
+            "release_date": filtered_params.get("releaseDate", None),
+            "parent_male_id": filtered_params.get("fatherId", None),
+            "parent_female_id": filtered_params.get("motherId", None),
+            "length_total": filtered_params.get("totalLength", None),
+            "water_body_name": filtered_params.get("waterBodyName", None),
+            "encounter_date": "",  # not tracked rn
+            "meeting_time": filtered_params.get("encounterTime", None),
+            "photo_id": filtered_params.get("bellyPhotoNumber", None),
+            "status": filtered_params.get("status", None),
+            "water_body_number": filtered_params.get("waterBodyNumber", None),
+	}.items() if v
+    }
+   
+    if not id_service.card_service._update_card(submission_id, **new_params):
         raise APIError(status=500, msg="Something went wrong")
 
     return {}
+
+
+def delete_card(
+    newt_id: str,
+    card_type: str,
+    id_service: IdentificationService,
+) -> Dict[str, Any]:
+    card_id = f"{newt_id}-{card_type.replace('-', '')}"
+    result = id_service.card_service._delete_card(card_id, False, True)
+
+    if result['error'] is not None:
+        raise APIError(status=400, msg=result['error'])
+
+    return {}
+
+
+def delete_newt(
+    newt_id: str,
+    id_service: IdentificationService,
+) -> Dict[str, Any]:
+    card_ids = id_service.card_service.get_matching_card_ids(newt_id)
+    if not card_ids:
+        raise APIError(status=404, msg=f"Newt {newt_id} not found")
+    
+    for id in card_ids:
+        result = id_service.card_service._delete_card(id, False, True)
+        if result['error'] is not None:
+            raise APIError(status=400, msg=result['error'])
+
+    return {}
+

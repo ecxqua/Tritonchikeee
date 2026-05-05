@@ -52,7 +52,7 @@ BASE_FIELDS = {
 
 ALLOWED_FIELDS = {
     'ИК-1': [
-        'date', 'length_body', 'weight', 'sex',
+        'date', 'length_body', 'weight', 'sex', 'length_tail',
         'birth_year_exact', 'birth_year_approx', 
         'origin_region', 'length_device', 'weight_device', 'notes'
     ],
@@ -113,14 +113,14 @@ def _validate_template_fields(
 
     # 2. Проверка на лишние поля
     extra = [f for f in card_data.keys() if f not in allowed]
-    if extra:
-        raise ValueError(
-            f"Шаблон '{template_type}' не поддерживает следующие поля: {', '.join(extra)}\n"
-            f"Допустимые поля: {allowed}"
-        )
+    #if extra:
+    #    raise ValueError(
+    #        f"Шаблон '{template_type}' не поддерживает следующие поля: {', '.join(extra)}\n"
+    #        f"Допустимые поля: {allowed}"
+    #    )
 
     # 3. Возвращаем только разрешённые поля (защита от SQL-инъекций/мусора)
-    return {k: v for k, v in card_data.items() if k in allowed}
+    return {k: v for k, v in card_data.items() if k in allowed and k not in extra}
 
 # ВАЛИДАТОР НА ЧТЕНИЕ
 def filter_card_by_template(
@@ -565,6 +565,8 @@ class CardService:
             conn.close()
     
     def _update_card(self, card_id: str, **kwargs) -> bool:
+        print(card_id)
+        print(self.get_card(card_id))
         """Обновляет данные существующей карточки."""
         if not kwargs:
             logger.warning("Нет полей для обновления")
@@ -896,7 +898,7 @@ class CardService:
         
         # 1. Забираем все карточки проекта
         cursor.execute('''
-            SELECT card_id, template_type, species, created_at, date
+            SELECT card_id, template_type, species, created_at, date, sex, notes
             FROM cards
             WHERE project_id = ?
             ORDER BY card_id ASC
@@ -924,7 +926,9 @@ class CardService:
                 'card_id': row['card_id'],
                 'template_type': row['template_type'],
                 'created_at': row['created_at'],
-                'date': row['date']
+                'date': row['date'],
+		'sex': row['sex'],
+		'status': row['notes'],
             })
             
         # 3. ВАЛИДАЦИЯ ЦЕЛОСТНОСТИ

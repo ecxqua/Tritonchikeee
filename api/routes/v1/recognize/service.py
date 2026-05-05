@@ -50,17 +50,24 @@ def _build_match(
 
 def complete_recognize(
     file_data: FileData,
-    scope: str,
+    scope: str | None,
     project_id: int | None,
     id_service: IdentificationService,
     temp: TempStorage
 ) -> Dict[str, Any]:
-    if scope not in _allowed_scopes:
+    if scope is not None and scope not in _allowed_scopes:
         raise APIError(status=400, msg=f"Incorrect scope {scope}")
 
-    if project_id is not None and \
-            id_service.project_service.get_project_by_id(project_id) is None:
-        raise APIError(status=400, msg=f"Unknown project ID {project_id}")
+    territories = None
+    species = None
+
+    if project_id is not None:
+        project = id_service.project_service.get_project_by_id(project_id)
+        if not project:
+            raise APIError(status=404, msg=f"Unknown project {project_id}")
+
+        territories = project.get('territories_filter', None)
+        species = project.get('species_filter', None)
 
     path = temp.write_temp_file(
         path=temp.make_temp_file_name(
@@ -70,13 +77,12 @@ def complete_recognize(
         data=file_data.data
     )
 
-    # TODO add filters later
-    # with scope and projectId
-
     try:
         res = id_service.identify_and_prepare(
             image_path=str(path),
-            project_ids=[1],
+            project_ids=[project_id] if project_id else None,
+            territory=territories,
+            species=species,
             top_k=5,
             debug=True
         )

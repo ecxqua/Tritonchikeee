@@ -48,7 +48,7 @@ async def patch_card_by_newt_id(
     newt_id: str,
     id_service: IdentificationService = Depends(get_id_service),
 ):
-    params = dict(await request.form())
+    params = dict(await request.json())
 
     try:
         result = await run_in_threadpool(
@@ -62,3 +62,44 @@ async def patch_card_by_newt_id(
         return result
     except APIError as ex:
         raise HTTPException(status_code=ex.status, detail=str(ex))
+
+
+@router.delete("/newts/{newt_id}/card")
+async def delete_card_by_id_type(
+    response: Response,
+    newt_id: str,
+    cardType: str,
+    id_service: IdentificationService = Depends(get_id_service),
+):
+    try:
+        result = await run_in_threadpool(
+	    service.delete_card,
+	    newt_id,
+	    cardType,
+	    id_service,
+        )
+
+        response.status_code = 204
+        return result
+    except APIError as ex:
+        raise HTTPException(status_code=ex.status, detail=str(ex))
+
+
+@router.delete("/newts/{newt_id}")
+async def delete_newt(
+    response: Response,
+    newt_id: str,
+    id_service: IdentificationService = Depends(get_id_service),
+):
+    try:
+        result = await run_in_threadpool(
+	    service.delete_newt,
+	    newt_id,
+	    id_service,
+	)
+	
+        response.status_code = 204
+        return result
+    except APIError as ex:
+        raise HTTPException(status_code=ex.status, detail=str(ex))
+
