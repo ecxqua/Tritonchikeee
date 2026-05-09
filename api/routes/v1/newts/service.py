@@ -163,7 +163,7 @@ def delete_card(
     id_service: IdentificationService,
 ) -> Dict[str, Any]:
     card_id = f"{newt_id}-{card_type.replace('-', '')}"
-    result = id_service.card_service._delete_card(card_id, False, True)
+    result = id_service.card_service._delete_card(card_id, True, True)
 
     if result['error'] is not None:
         raise APIError(status=400, msg=result['error'])
@@ -180,7 +180,7 @@ def delete_newt(
         raise APIError(status=404, msg=f"Newt {newt_id} not found")
     
     for id in card_ids:
-        result = id_service.card_service._delete_card(id, False, True)
+        result = id_service.card_service._delete_card(id, True, True)
         if result['error'] is not None:
             raise APIError(status=400, msg=result['error'])
 
