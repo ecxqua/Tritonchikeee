@@ -35,7 +35,7 @@ import sqlite3
 from pipeline.deployment_yolo_new import process_single_image_sync
 from pipeline.deployment_dinov2_faiss import load_model, get_embedding, get_embedding_from_array, DEFAULT_TRANSFORM, search_vectors
 from services.embedding_service import EmbeddingService
-from services.card_service import CardService, extract_prototype_id, form_card_id
+from services.card_service import CardService, extract_prototype_id, form_card_id, REQUIRED_FIELDS
 from services.upload_service import UploadService
 from services.project_service import ProjectService
 
@@ -871,6 +871,10 @@ class IdentificationService:
         else:
             result['error'] = "Не удалось обновить карточку особи"
             return result
+
+    def get_required_card_fields(self):
+        """Возвращает словарь обязательных полей для каждого шаблона карты."""
+        return REQUIRED_FIELDS
 
     def cleanup_expired_uploads(self) -> int:
         """Очищает просроченные загрузки."""
