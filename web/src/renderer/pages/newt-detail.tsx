@@ -14,6 +14,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { ArrowLeft, Save, Trash2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { PhotoGallery } from "@/components/photo-gallery";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 export function NewtDetail() {
   const params = useParams();
@@ -96,63 +97,72 @@ export function NewtDetail() {
   };
 
   const renderField = (
-    index: number,
-    key: string,
-    label: string,
-    value: any,
-    type = "text",
-    isParentId = false
-  ) => {
-    const isEditing = editingIndex === index;
+  index: number,
+  key: string,
+  label: string,
+  value: any,
+  type = "text",
+  isParentId = false,
+  options?: string[]
+) => {
+  const isEditing = editingIndex === index;
 
-    if (!isEditing) {
-      const displayValue = value || "—";
-      const canLinkParent =
-        isParentId &&
-        typeof value === "string" &&
-        value.trim() !== "" &&
-        value !== "данные отсутствуют";
-
-      return (
-        <div className="py-3 border-b last:border-0 border-border/50">
-          <dt className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-1">
-            {label}
-          </dt>
-          <dd className="text-sm font-medium">
-            {canLinkParent ? (
-              <Link href={`/newts/${value}`}>
-                <span className="text-primary underline cursor-pointer">{displayValue}</span>
-              </Link>
-            ) : (
-              displayValue
-            )}
-          </dd>
-        </div>
-      );
-    }
+  if (!isEditing) {
+    const displayValue = value || "—";
+    const canLinkParent = isParentId && typeof value === "string" && value.trim() !== "" && value !== "данные отсутствуют";
 
     return (
-      <div className="py-3 border-b last:border-0 border-border/50 space-y-2">
-        <Label className="text-xs uppercase tracking-wider text-muted-foreground">
-          {label}
-        </Label>
-        <Input
-          type={type}
-          value={editData[index]?.[key] || ""}
-          onChange={(e) =>
-            setEditData(prev => ({
-              ...prev,
-              [index]: {
-                ...prev[index],
-                [key]: e.target.value,
-              },
-            }))
-          }
-          className="h-8"
-        />
+      <div className="py-3 border-b last:border-0 border-border/50">
+        <dt className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-1">{label}</dt>
+        <dd className="text-sm font-medium">
+          {canLinkParent ? (
+            <Link href={`/newts/${value}`}>
+              <span className="text-primary underline cursor-pointer">{displayValue}</span>
+            </Link>
+          ) : (
+            displayValue
+          )}
+        </dd>
       </div>
     );
-  };
+  }
+
+  if (options && options.length > 0) {
+    const currentValue = editData[index]?.[key] || value || options[0];
+    return (
+      <div className="py-3 border-b last:border-0 border-border/50 space-y-2">
+        <Label className="text-xs uppercase tracking-wider text-muted-foreground">{label}</Label>
+        <Select 
+          value={currentValue} 
+          onValueChange={(val) => setEditData(prev => ({
+            ...prev,
+            [index]: { ...prev[index], [key]: val }
+          }))}
+        >
+          <SelectTrigger className="h-8"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            {options.map(opt => <SelectItem key={opt} value={opt}>{opt}</SelectItem>)}
+          </SelectContent>
+        </Select>
+      </div>
+    );
+  }
+
+  return (
+    <div className="py-3 border-b last:border-0 border-border/50 space-y-2">
+      <Label className="text-xs uppercase tracking-wider text-muted-foreground">{label}</Label>
+      <Input
+        type={type}
+        value={editData[index]?.[key] || ""}
+        onChange={(e) => setEditData(prev => ({
+          ...prev,
+          [index]: { ...prev[index], [key]: e.target.value }
+        }))}
+        className="h-8"
+      />
+    </div>
+  );
+};
 
   const renderCard = (card: NewtCard, index: number) => {
     const data = editingIndex === index ? editData[index] : card.data;
@@ -162,6 +172,7 @@ export function NewtDetail() {
         return (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8">
             <div className="space-y-0">
+              {renderField(index, "species", "Вид", data?.species, "text", false, ["тритон карелина", "ребристый"])}
               {renderField(index, "dateFilled", "Дата заполнения карточки", data?.dateFilled, "date")}
               {renderField(index, "exactBirthDate", "Точная дата рождения особи", data?.exactBirthDate, "date")}
               {renderField(index, "bodyLength", "Длина тела (L), мм", data?.bodyLength, "number")}
@@ -183,6 +194,7 @@ export function NewtDetail() {
         return (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8">
             <div className="space-y-0">
+              {renderField(index, "species", "Вид", data?.species, "text", false, ["тритон карелина", "ребристый"])}
               {renderField(index, "dateFilled", "Дата заполнения", data?.dateFilled, "date")}
               {renderField(index, "releaseDate", "Дата выпуска в водоём", data?.releaseDate, "date")}
               {renderField(index, "fatherId", "ID отца", data?.fatherId, "text", true)}
@@ -202,6 +214,7 @@ export function NewtDetail() {
         return (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8">
             <div className="space-y-0">
+              {renderField(index, "species", "Вид", data?.species, "text", false, ["тритон карелина", "ребристый"])}
               {renderField(index, "encounterDate", "Дата встречи", data?.encounterDate, "date")}
               {renderField(index, "encounterTime", "Время встречи", data?.encounterTime, "time")}
               {renderField(index, "bodyLength", "Длина тела (L), мм", data?.bodyLength, "number")}
@@ -224,6 +237,7 @@ export function NewtDetail() {
       return (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8">
           <div className="space-y-0">
+            {renderField(index, "species", "Вид", data?.species, "text", false, ["тритон карелина", "ребристый"])}
             {renderField(index, "encounterDate", "Дата встречи", data?.encounterDate, "date")}
             {renderField(index, "encounterTime", "Время встречи", data?.encounterTime, "time")}
             {renderField(index, "totalLength", "Общая длина (L+Lcd), см", data?.totalLength, "number")}
