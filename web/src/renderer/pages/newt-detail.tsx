@@ -295,7 +295,7 @@ export function NewtDetail() {
                   toast({ title: "Карточка удалена" });
                 } catch {
                   toast({
-                    title: "Не удалось удалить карточку. Возможно, endpoint не реализован на backend.",
+                    title: "Не удалось удалить карточку.",
                     variant: "destructive",
                   });
                 } finally {
