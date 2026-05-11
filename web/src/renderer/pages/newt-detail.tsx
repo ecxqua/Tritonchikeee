@@ -165,14 +165,15 @@ export function NewtDetail() {
 };
 
   const renderCard = (card: NewtCard, index: number) => {
-    const data = editingIndex === index ? editData[index] : card.data;
+    const cardData = card.data || {};
+    const data = editingIndex === index ? editData[index] : cardData;
 
     const renderFieldsForCardType = () => {
       if (card.cardType === "ИК-1") {
         return (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8">
             <div className="space-y-0">
-              {renderField(index, "species", "Вид", data?.species, "text", false, ["тритон карелина", "ребристый"])}
+              {renderField(index, "species", "Вид", cardData.species || card.species, "text", false, ["тритон карелина", "ребристый"])}
               {renderField(index, "dateFilled", "Дата заполнения карточки", data?.dateFilled, "date")}
               {renderField(index, "exactBirthDate", "Точная дата рождения особи", data?.exactBirthDate, "date")}
               {renderField(index, "bodyLength", "Длина тела (L), мм", data?.bodyLength, "number")}
@@ -194,7 +195,7 @@ export function NewtDetail() {
         return (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8">
             <div className="space-y-0">
-              {renderField(index, "species", "Вид", data?.species, "text", false, ["тритон карелина", "ребристый"])}
+              {renderField(index, "species", "Вид", cardData.species || card.species, "text", false, ["тритон карелина", "ребристый"])}
               {renderField(index, "dateFilled", "Дата заполнения", data?.dateFilled, "date")}
               {renderField(index, "releaseDate", "Дата выпуска в водоём", data?.releaseDate, "date")}
               {renderField(index, "fatherId", "ID отца", data?.fatherId, "text", true)}
@@ -214,7 +215,7 @@ export function NewtDetail() {
         return (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8">
             <div className="space-y-0">
-              {renderField(index, "species", "Вид", data?.species, "text", false, ["тритон карелина", "ребристый"])}
+              {renderField(index, "species", "Вид", cardData.species || card.species, "text", false, ["тритон карелина", "ребристый"])}
               {renderField(index, "encounterDate", "Дата встречи", data?.encounterDate, "date")}
               {renderField(index, "encounterTime", "Время встречи", data?.encounterTime, "time")}
               {renderField(index, "bodyLength", "Длина тела (L), мм", data?.bodyLength, "number")}
@@ -237,7 +238,7 @@ export function NewtDetail() {
       return (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8">
           <div className="space-y-0">
-            {renderField(index, "species", "Вид", data?.species, "text", false, ["тритон карелина", "ребристый"])}
+            {renderField(index, "species", "Вид", cardData.species || card.species, "text", false, ["тритон карелина", "ребристый"])}
             {renderField(index, "encounterDate", "Дата встречи", data?.encounterDate, "date")}
             {renderField(index, "encounterTime", "Время встречи", data?.encounterTime, "time")}
             {renderField(index, "totalLength", "Общая длина (L+Lcd), см", data?.totalLength, "number")}
