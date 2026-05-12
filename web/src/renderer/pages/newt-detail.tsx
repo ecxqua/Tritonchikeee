@@ -58,13 +58,43 @@ export function NewtDetail() {
     });
   }, [newtId]);
 
-  const handleEditStart = (index: number) => {
-    setEditData(prev => ({
-      ...prev,
-      [index]: cards[index]?.data ? { ...cards[index].data } : {},
-    }));
-    setEditingIndex(index);
+  const toInputDate = (dateStr: string | undefined): string => {
+    if (!dateStr) return "";
+    if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return dateStr;
+    
+    const parts = dateStr.split(".");
+    if (parts.length === 3) {
+      return `${parts[2]}-${parts[1]}-${parts[0]}`;
+    }
+    return "";
   };
+
+  const toDisplayDate = (dateStr: string | undefined): string => {
+    if (!dateStr) return "";
+    if (/^\d{2}\.\d{2}\.\d{4}$/.test(dateStr)) return dateStr;
+    
+    const parts = dateStr.split("-");
+    if (parts.length === 3) {
+      return `${parts[2]}.${parts[1]}.${parts[0]}`;
+    }
+    return dateStr;
+  };
+
+  const handleEditStart = (index: number) => {
+  const card = cards[index];
+  const rawData = card?.data || {};
+
+  const initializedData = {
+    species: rawData.species || card?.species || "тритон карелина",
+    ...rawData,
+  };
+
+  setEditData(prev => ({
+    ...prev,
+    [index]: initializedData,
+  }));
+  setEditingIndex(index);
+};
 
   const handleSave = async (index: number) => {
     const card = cards[index];
@@ -128,7 +158,9 @@ export function NewtDetail() {
   }
 
   if (options && options.length > 0) {
-    const currentValue = editData[index]?.[key] || value || options[0];
+    const storedVal = editData[index]?.[key];
+    const currentValue = storedVal || value || options[0];
+
     return (
       <div className="py-3 border-b last:border-0 border-border/50 space-y-2">
         <Label className="text-xs uppercase tracking-wider text-muted-foreground">{label}</Label>
@@ -153,11 +185,14 @@ export function NewtDetail() {
       <Label className="text-xs uppercase tracking-wider text-muted-foreground">{label}</Label>
       <Input
         type={type}
-        value={editData[index]?.[key] || ""}
-        onChange={(e) => setEditData(prev => ({
-          ...prev,
-          [index]: { ...prev[index], [key]: e.target.value }
-        }))}
+        value={type === "date" ? toInputDate(editData[index]?.[key] as string) : (editData[index]?.[key] || " ")}
+        onChange={(e) => {
+          const newValue = type === "date" ? toDisplayDate(e.target.value) : e.target.value;
+          setEditData(prev => ({
+            ...prev,
+            [index]: { ...prev[index], [key]: newValue }
+          }));
+        }}
         className="h-8"
       />
     </div>
