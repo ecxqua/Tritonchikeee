@@ -10,6 +10,7 @@ import { useToast } from "@/hooks/use-toast";
 export function Settings() {
   const { toast } = useToast();
   const [apiBaseUrl, setApiBaseUrl] = useState("");
+  const [recognizeTopK, setRecognizeTopK] = useState(5);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
@@ -18,6 +19,7 @@ export function Settings() {
       .getConfig()
       .then((c) => {
         setApiBaseUrl(c.apiBaseUrl ?? "");
+        setRecognizeTopK(c.recognizeTopK ?? 5);
       })
       .catch(() => {
         toast({ title: "Не удалось загрузить конфигурацию", variant: "destructive" });
@@ -38,10 +40,21 @@ export function Settings() {
       return;
     }
 
+    // Validate recognizeTopK
+    const topK = Math.floor(recognizeTopK);
+    if (topK < 1 || topK > 100) {
+      toast({ title: "Количество должно быть от 1 до 100", variant: "destructive" });
+      return;
+    }
+
     setSaving(true);
     try {
-      const next = await window.api.setConfig({ apiBaseUrl: trimmed });
+      const next = await window.api.setConfig({ 
+        apiBaseUrl: trimmed,
+        recognizeTopK: topK 
+      });
       setApiBaseUrl(next.apiBaseUrl);
+      setRecognizeTopK(next.recognizeTopK);
       toast({ title: "Настройки сохранены" });
     } catch {
       toast({ title: "Не удалось сохранить", variant: "destructive" });
@@ -80,6 +93,24 @@ export function Settings() {
                   className="font-mono text-sm"
                 />
               </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="recognizeTopK">Количество результатов распознавания</Label>
+                <Input
+                  id="recognizeTopK"
+                  type="number"
+                  min={1}
+                  max={100}
+                  value={recognizeTopK}
+                  onChange={(e) => setRecognizeTopK(Number(e.target.value))}
+                  placeholder="5"
+                  className="font-mono text-sm w-32"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Сколько особей возвращать при распознавании (по умолчанию 5, максимум 100)
+                </p>
+              </div>
+
               <Button onClick={handleSave} disabled={saving} className="gap-2">
                 <Save className="w-4 h-4" />
                 {saving ? "Сохранение…" : "Сохранить"}

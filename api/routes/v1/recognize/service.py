@@ -52,6 +52,7 @@ def complete_recognize(
     file_data: FileData,
     scope: str,
     project_id: int | None,
+    top_k: int | None,
     id_service: IdentificationService,
     temp: TempStorage
 ) -> Dict[str, Any]:
@@ -61,6 +62,16 @@ def complete_recognize(
     if project_id is not None and \
             id_service.project_service.get_project_by_id(project_id) is None:
         raise APIError(status=400, msg=f"Unknown project ID {project_id}")
+
+    k = top_k if top_k is not None else 5
+    try:
+        k = int(k)
+    except (TypeError, ValueError):
+        k = 5
+    if k < 1:
+        k = 1
+    if k > 100:
+        k = 100
 
     path = temp.write_temp_file(
         path=temp.make_temp_file_name(
@@ -77,7 +88,7 @@ def complete_recognize(
         res = id_service.identify_and_prepare(
             image_path=str(path),
             project_ids=[1],
-            top_k=5,
+            top_k=k,
             debug=True
         )
 

@@ -14,6 +14,9 @@ export type RecognizeSessionSnapshot = {
   projectId: string;
   expandedNewtId: string | null;
   newtSummaryById: Record<string, NewtSummaryEntry>;
+  /** data: URL persisted so preview survives navigation away from /recognize */
+  previewDataUrl?: string | null;
+  photoName?: string;
 };
 
 export function loadRecognizeSession(): RecognizeSessionSnapshot | null {

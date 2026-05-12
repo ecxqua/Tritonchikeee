@@ -1,3 +1,4 @@
 {
-  "apiBaseUrl": "https://tritoni.runderscore.com/api/v1"
+  "apiBaseUrl": "https://tritoni.runderscore.com/api/v1",
+  "recognizeTopK": 5
 }

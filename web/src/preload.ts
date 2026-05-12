@@ -5,7 +5,7 @@ import { contextBridge, ipcRenderer } from "electron";
 
 contextBridge.exposeInMainWorld("api", {
   getConfig: () => ipcRenderer.invoke("config:get"),
-  setConfig: (partial: { apiBaseUrl?: string }) =>
+  setConfig: (partial: { apiBaseUrl?: string; recognizeTopK?: number }) =>
     ipcRenderer.invoke("config:set", partial),
 });
 

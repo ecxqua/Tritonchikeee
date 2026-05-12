@@ -1,7 +1,7 @@
 
 async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
   const config = await window.api.getConfig();
-  const BASE_URL = config.apiBaseUrl;
+  const BASE_URL = config.apiBaseUrl.replace(/\/+$/, "");
 
   console.log("Running request:", {
     url: `${BASE_URL}${path}`,
@@ -43,6 +43,9 @@ export async function recognizeNewt(params: {
   if (params.projectId !== undefined) {
     formData.append("projectId", String(params.projectId));
   }
+
+  const cfg = await window.api.getConfig();
+  formData.append("topK", String(cfg.recognizeTopK ?? 5));
 
   return apiFetch<RecognizeResponse>("/recognize", {
     method: "POST",

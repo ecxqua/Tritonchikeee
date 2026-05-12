@@ -34,50 +34,77 @@ export function Recognize() {
   const [projects, setProjects] = useState<{ id: number; name: string }[]>([]);
 
   useEffect(() => {
-    const snap = loadRecognizeSession();
-    if (snap) {
-      setResult(snap.result ?? null);
-      setScope(snap.scope);
-      setProjectId(snap.projectId);
-      setExpandedNewtId(snap.expandedNewtId ?? null);
-      setNewtSummaryById(snap.newtSummaryById ?? {});
+  const snap = loadRecognizeSession();
+  if (snap) {
+    setResult(snap.result ?? null);
+    setScope(snap.scope);
+    setProjectId(snap.projectId);
+    setExpandedNewtId(snap.expandedNewtId ?? null);
+    setNewtSummaryById(snap.newtSummaryById ?? {});
+    
+    // ← Восстанавливаем превью и фото из сессии
+    if (snap.previewDataUrl && snap.photoName) {
+      setPreviewUrl(snap.previewDataUrl);
+      // Конвертируем data URL обратно в File
+      fetch(snap.previewDataUrl)
+        .then(res => res.blob())
+        .then(blob => {
+          const file = new File([blob], snap.photoName!, { type: blob.type });
+          setPhoto(file);
+        })
+        .catch(console.warn);
     }
-    setSessionRestored(true);
-  }, []);
+  }
+  setSessionRestored(true);
+}, []);
 
   useEffect(() => {
-    if (!sessionRestored || isPending) return;
-    saveRecognizeSession({
-      result,
-      scope,
-      projectId,
-      expandedNewtId,
-      newtSummaryById,
-    });
-  }, [sessionRestored, isPending, result, scope, projectId, expandedNewtId, newtSummaryById]);
+  if (!sessionRestored || isPending) return;
+  
+  saveRecognizeSession({
+    result,
+    scope,
+    projectId,
+    expandedNewtId,
+    newtSummaryById,
+    previewDataUrl: previewUrl, // ← сохраняем data URL
+    photoName: photo?.name,     // ← сохраняем имя файла
+  });
+}, [sessionRestored, isPending, result, scope, projectId, expandedNewtId, newtSummaryById, previewUrl, photo]);
 
   useEffect(() => {
     listProjects().then(setProjects);
   }, []);
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    function fileToDataUrl(file: File): Promise<string> {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result as string);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+    }
+
+    const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
       const file = e.target.files[0];
       setPhoto(file);
-      setPreviewUrl(URL.createObjectURL(file));
+      const dataUrl = await fileToDataUrl(file);
+      setPreviewUrl(dataUrl); // ← используем data URL вместо blob
       setResult(null);
       setExpandedNewtId(null);
       clearRecognizeSession();
     }
   };
 
-  const handleDrop = (e: React.DragEvent) => {
+  const handleDrop = async (e: React.DragEvent) => {
     e.preventDefault();
     setIsDragging(false);
     if (e.dataTransfer.files && e.dataTransfer.files[0]) {
       const file = e.dataTransfer.files[0];
       setPhoto(file);
-      setPreviewUrl(URL.createObjectURL(file));
+      const dataUrl = await fileToDataUrl(file);
+      setPreviewUrl(dataUrl);
       setResult(null);
       setExpandedNewtId(null);
       clearRecognizeSession();
@@ -101,17 +128,14 @@ export function Recognize() {
   };
 
   const resetRecognitionSession = () => {
-    if (previewUrl?.startsWith("blob:")) {
-      URL.revokeObjectURL(previewUrl);
-    }
-    clearRecognizeSession();
-    setResult(null);
-    setExpandedNewtId(null);
-    setNewtSummaryById({});
-    setPhoto(null);
-    setPreviewUrl(null);
-    setIsPending(false);
-  };
+  clearRecognizeSession();
+  setResult(null);
+  setExpandedNewtId(null);
+  setNewtSummaryById({});
+  setPhoto(null);
+  setPreviewUrl(null);
+  setIsPending(false);
+};
 
   const loadNewtSummary = async (newtId: string) => {
     if (newtSummaryById[newtId]) return;
@@ -120,6 +144,7 @@ export function Recognize() {
       ...prev,
       [newtId]: { isLoading: true, cardTypes: [] },
     }));
+
 
     try {
       const [newt, cards] = await Promise.all([getNewt(newtId), getNewtCards(newtId)]);

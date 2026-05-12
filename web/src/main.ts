@@ -10,18 +10,49 @@ if (started) {
 
 const OVERRIDE_FILE = "app-cfg.override.json";
 
-let config = {
-  apiBaseUrl: "http://localhost:8080",
+type AppConfig = {
+  apiBaseUrl: string;
+  recognizeTopK: number;
 };
 
+const DEFAULT_CONFIG: AppConfig = {
+  apiBaseUrl: "http://localhost:8080",
+  recognizeTopK: 5,
+};
+
+let config: AppConfig = { ...DEFAULT_CONFIG };
+
+function stripTrailingSlashes(url: string): string {
+  return url.replace(/\/+$/, "");
+}
+
+function clampRecognizeTopK(value: unknown): number {
+  const n = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(n)) return DEFAULT_CONFIG.recognizeTopK;
+  const k = Math.floor(n);
+  if (k < 1) return 1;
+  if (k > 100) return 100;
+  return k;
+}
+
+function normalizeConfig(raw: Partial<AppConfig> & Record<string, unknown>): AppConfig {
+  const url = stripTrailingSlashes(String(raw.apiBaseUrl ?? "").trim()) || DEFAULT_CONFIG.apiBaseUrl;
+  return {
+    apiBaseUrl: url,
+    recognizeTopK: clampRecognizeTopK(raw.recognizeTopK),
+  };
+}
+
 function loadConfig() {
+  let merged: Record<string, unknown> = { ...DEFAULT_CONFIG };
+
   try {
     const configPath = app.isPackaged
       ? path.join(process.resourcesPath, "app-cfg.json")
       : path.join(__dirname, "../../app-cfg.json");
 
     const raw = fs.readFileSync(configPath, "utf-8");
-    config = JSON.parse(raw);
+    merged = { ...merged, ...JSON.parse(raw) };
   } catch {
     console.warn("Using default config");
   }
@@ -30,11 +61,13 @@ function loadConfig() {
     const overridePath = path.join(app.getPath("userData"), OVERRIDE_FILE);
     if (fs.existsSync(overridePath)) {
       const over = JSON.parse(fs.readFileSync(overridePath, "utf-8"));
-      config = { ...config, ...over };
+      merged = { ...merged, ...over };
     }
   } catch (e) {
     console.warn("Could not merge config override:", e);
   }
+
+  config = normalizeConfig(merged);
 }
 
 function registerConfigIpc() {
@@ -43,23 +76,38 @@ function registerConfigIpc() {
 
   ipcMain.handle("config:get", () => ({ ...config }));
 
-  ipcMain.handle("config:set", (_evt, partial: { apiBaseUrl?: string }) => {
-    if (partial && typeof partial.apiBaseUrl === "string") {
-      const t = partial.apiBaseUrl.trim();
-      if (t) {
-        config = { ...config, apiBaseUrl: t };
+  ipcMain.handle(
+    "config:set",
+    (_evt, partial: { apiBaseUrl?: string; recognizeTopK?: number }) => {
+      let next: AppConfig = { ...config };
+
+      if (partial && typeof partial.apiBaseUrl === "string") {
+        const t = stripTrailingSlashes(partial.apiBaseUrl.trim());
+        if (t) {
+          next.apiBaseUrl = t;
+        }
       }
-    }
-    const userData = app.getPath("userData");
-    fs.mkdirSync(userData, { recursive: true });
-    const overridePath = path.join(userData, OVERRIDE_FILE);
-    fs.writeFileSync(
-      overridePath,
-      JSON.stringify({ apiBaseUrl: config.apiBaseUrl }, null, 2),
-      "utf-8",
-    );
-    return { ...config };
-  });
+      if (partial && partial.recognizeTopK !== undefined) {
+        next.recognizeTopK = clampRecognizeTopK(partial.recognizeTopK);
+      }
+
+      config = normalizeConfig(next);
+
+      const userData = app.getPath("userData");
+      fs.mkdirSync(userData, { recursive: true });
+      const overridePath = path.join(userData, OVERRIDE_FILE);
+      fs.writeFileSync(
+        overridePath,
+        JSON.stringify(
+          { apiBaseUrl: config.apiBaseUrl, recognizeTopK: config.recognizeTopK },
+          null,
+          2,
+        ),
+        "utf-8",
+      );
+      return { ...config };
+    },
+  );
 }
 
 const createWindow = () => {
