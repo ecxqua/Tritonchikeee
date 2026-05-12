@@ -8,6 +8,8 @@ if (started) {
   app.quit();
 }
 
+const OVERRIDE_FILE = "app-cfg.override.json";
+
 let config = {
   apiBaseUrl: "http://localhost:8080",
 };
@@ -23,12 +25,46 @@ function loadConfig() {
   } catch {
     console.warn("Using default config");
   }
+
+  try {
+    const overridePath = path.join(app.getPath("userData"), OVERRIDE_FILE);
+    if (fs.existsSync(overridePath)) {
+      const over = JSON.parse(fs.readFileSync(overridePath, "utf-8"));
+      config = { ...config, ...over };
+    }
+  } catch (e) {
+    console.warn("Could not merge config override:", e);
+  }
+}
+
+function registerConfigIpc() {
+  ipcMain.removeHandler("config:get");
+  ipcMain.removeHandler("config:set");
+
+  ipcMain.handle("config:get", () => ({ ...config }));
+
+  ipcMain.handle("config:set", (_evt, partial: { apiBaseUrl?: string }) => {
+    if (partial && typeof partial.apiBaseUrl === "string") {
+      const t = partial.apiBaseUrl.trim();
+      if (t) {
+        config = { ...config, apiBaseUrl: t };
+      }
+    }
+    const userData = app.getPath("userData");
+    fs.mkdirSync(userData, { recursive: true });
+    const overridePath = path.join(userData, OVERRIDE_FILE);
+    fs.writeFileSync(
+      overridePath,
+      JSON.stringify({ apiBaseUrl: config.apiBaseUrl }, null, 2),
+      "utf-8",
+    );
+    return { ...config };
+  });
 }
 
 const createWindow = () => {
   loadConfig();
-
-  ipcMain.handle("config:get", () => config);
+  registerConfigIpc();
   
   // Create the browser window.
   const mainWindow = new BrowserWindow({

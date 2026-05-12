@@ -41,10 +41,19 @@ export function Sidebar() {
         })}
       </nav>
       <div className="p-4 border-t">
-        <div className="flex items-center gap-3 px-3 py-2.5 rounded-md cursor-pointer text-sidebar-foreground hover:bg-sidebar-accent transition-colors">
-          <Settings className="w-5 h-5" />
-          <span>Настройки</span>
-        </div>
+        <Link href="/settings">
+          <div
+            className={cn(
+              "flex items-center gap-3 px-3 py-2.5 rounded-md cursor-pointer transition-colors",
+              location === "/settings"
+                ? "bg-sidebar-primary text-sidebar-primary-foreground font-medium"
+                : "text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+            )}
+          >
+            <Settings className="w-5 h-5" />
+            <span>Настройки</span>
+          </div>
+        </Link>
       </div>
     </div>
   );

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useParams, Link } from "wouter";
+import { clearNewtReturnHint, getBackHrefForNewt } from "@/lib/return-from-recognize";
 import {
   getNewt,
   getNewtCards,
@@ -146,7 +147,7 @@ export function NewtDetail() {
         <dt className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-1">{label}</dt>
         <dd className="text-sm font-medium">
           {canLinkParent ? (
-            <Link href={`/newts/${value}`}>
+            <Link href={`/newts/${value}`} onClick={() => clearNewtReturnHint()}>
               <span className="text-primary underline cursor-pointer">{displayValue}</span>
             </Link>
           ) : (
@@ -373,10 +374,13 @@ export function NewtDetail() {
     return <div className="p-8 text-center text-muted-foreground">Особь не найдена</div>;
   }
 
+  const defaultBackHref = newt.projectId ? `/projects/${newt.projectId}` : "/projects";
+  const backHref = getBackHrefForNewt(newtId, defaultBackHref);
+
   return (
     <div className="p-8 max-w-5xl mx-auto space-y-8 animate-in fade-in duration-500">
 
-      <Link href={newt.projectId ? `/projects/${newt.projectId}` : "/projects"}>
+      <Link href={backHref} onClick={() => clearNewtReturnHint()}>
         <Button variant="ghost" size="sm">
           <ArrowLeft className="w-4 h-4 mr-2" /> Назад
         </Button>

@@ -5,6 +5,8 @@ import { contextBridge, ipcRenderer } from "electron";
 
 contextBridge.exposeInMainWorld("api", {
   getConfig: () => ipcRenderer.invoke("config:get"),
+  setConfig: (partial: { apiBaseUrl?: string }) =>
+    ipcRenderer.invoke("config:set", partial),
 });
 
 contextBridge.exposeInMainWorld("boot", {

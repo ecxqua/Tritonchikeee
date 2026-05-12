@@ -11,6 +11,7 @@ import { Projects } from "@/pages/projects";
 import { ProjectDetail } from "@/pages/project-detail";
 import { NewtDetail } from "@/pages/newt-detail";
 import { NewCard } from "@/pages/new-card";
+import { Settings } from "@/pages/settings";
 
 const queryClient = new QueryClient();
 
@@ -25,6 +26,7 @@ function Router() {
           <Route path="/projects/:projectId" component={ProjectDetail} />
           <Route path="/newts/:newtId" component={NewtDetail} />
           <Route path="/cards/new" component={NewCard} />
+          <Route path="/settings" component={Settings} />
           <Route component={NotFound} />
         </Switch>
       </Layout>

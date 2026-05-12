@@ -24,6 +24,7 @@ import { useEffect, useState, useMemo } from "react";
 import { useToast } from "@/hooks/use-toast";
 import { loadPhotos } from "@/components/photo-gallery";
 import { cn } from "@/lib/utils";
+import { clearNewtReturnHint } from "@/lib/return-from-recognize";
 
 type SortField = "date_desc" | "date_asc" | "name_asc" | "name_desc";
 
@@ -46,7 +47,7 @@ function PhotoPreviewModal({ newtId, newtLabel, onClose }: PhotoPreviewProps) {
             <p className="font-medium">Нет фотографий</p>
             <p className="text-sm mt-1">Для особи <span className="font-mono">{newtLabel}</span> фото не загружены</p>
           </div>
-          <Link href={`/newts/${newtId}`}>
+          <Link href={`/newts/${newtId}`} onClick={() => clearNewtReturnHint()}>
             <Button size="sm" onClick={onClose}>Открыть карточку</Button>
           </Link>
           <Button variant="ghost" size="sm" className="ml-2" onClick={onClose}>Закрыть</Button>
@@ -451,7 +452,7 @@ export function ProjectDetail() {
                       </div>
                     </div>
                   )}
-                  <Link href={`/newts/${newt.id}`}>
+                  <Link href={`/newts/${newt.id}`} onClick={() => clearNewtReturnHint()}>
                     <CardHeader className="p-4 pb-2">
                       <div className="flex justify-between items-start">
                         <CardTitle className="text-base font-mono bg-muted px-2 py-1 rounded">ID: {newt.id}</CardTitle>

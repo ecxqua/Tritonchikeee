@@ -5,9 +5,15 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Progress } from "@/components/ui/progress";
-import { UploadCloud, ScanSearch, CheckCircle2, XCircle, ChevronRight, Image as ImageIcon, PlusCircle } from "lucide-react";
+import { UploadCloud, ScanSearch, CheckCircle2, XCircle, ChevronRight, Image as ImageIcon, PlusCircle, Eraser } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { PhotoGallery } from "@/components/photo-gallery";
+import { setNewtOpenedFromRecognize } from "@/lib/return-from-recognize";
+import {
+  clearRecognizeSession,
+  loadRecognizeSession,
+  saveRecognizeSession,
+} from "@/lib/recognize-session";
 
 export function Recognize() {
   const [photo, setPhoto] = useState<File | null>(null);
@@ -23,8 +29,32 @@ export function Recognize() {
 
   const [result, setResult] = useState<any>(null);
   const [isPending, setIsPending] = useState(false);
+  const [sessionRestored, setSessionRestored] = useState(false);
 
   const [projects, setProjects] = useState<{ id: number; name: string }[]>([]);
+
+  useEffect(() => {
+    const snap = loadRecognizeSession();
+    if (snap) {
+      setResult(snap.result ?? null);
+      setScope(snap.scope);
+      setProjectId(snap.projectId);
+      setExpandedNewtId(snap.expandedNewtId ?? null);
+      setNewtSummaryById(snap.newtSummaryById ?? {});
+    }
+    setSessionRestored(true);
+  }, []);
+
+  useEffect(() => {
+    if (!sessionRestored || isPending) return;
+    saveRecognizeSession({
+      result,
+      scope,
+      projectId,
+      expandedNewtId,
+      newtSummaryById,
+    });
+  }, [sessionRestored, isPending, result, scope, projectId, expandedNewtId, newtSummaryById]);
 
   useEffect(() => {
     listProjects().then(setProjects);
@@ -37,6 +67,7 @@ export function Recognize() {
       setPreviewUrl(URL.createObjectURL(file));
       setResult(null);
       setExpandedNewtId(null);
+      clearRecognizeSession();
     }
   };
 
@@ -49,6 +80,7 @@ export function Recognize() {
       setPreviewUrl(URL.createObjectURL(file));
       setResult(null);
       setExpandedNewtId(null);
+      clearRecognizeSession();
     }
   };
 
@@ -65,6 +97,19 @@ export function Recognize() {
     });
 
     setResult(res);
+    setIsPending(false);
+  };
+
+  const resetRecognitionSession = () => {
+    if (previewUrl?.startsWith("blob:")) {
+      URL.revokeObjectURL(previewUrl);
+    }
+    clearRecognizeSession();
+    setResult(null);
+    setExpandedNewtId(null);
+    setNewtSummaryById({});
+    setPhoto(null);
+    setPreviewUrl(null);
     setIsPending(false);
   };
 
@@ -98,9 +143,17 @@ export function Recognize() {
 
   return (
     <div className="p-8 max-w-6xl mx-auto space-y-8 animate-in fade-in duration-500">
-      <div>
-        <h1 className="text-3xl font-bold tracking-tight">Опознание особи</h1>
-        <p className="text-muted-foreground">Загрузите фото брюшка для распознавания с помощью нейросети.</p>
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight">Опознание особи</h1>
+          <p className="text-muted-foreground">Загрузите фото брюшка для распознавания с помощью нейросети.</p>
+        </div>
+        {(result || expandedNewtId) && (
+          <Button variant="outline" size="sm" className="shrink-0 gap-2" onClick={resetRecognitionSession}>
+            <Eraser className="w-4 h-4" />
+            Очистить результаты
+          </Button>
+        )}
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
@@ -273,7 +326,13 @@ export function Recognize() {
                               <Progress value={match.confidence} className="h-1.5 mt-1.5" />
                             </div>
                             <div className="flex items-center gap-1 shrink-0">
-                              <Link href={`/newts/${match.newtId}`} onClick={e => e.stopPropagation()}>
+                              <Link
+                                href={`/newts/${match.newtId}`}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setNewtOpenedFromRecognize(String(match.newtId));
+                                }}
+                              >
                                 <Button variant="outline" size="sm" className="text-xs">
                                   Карточка <ChevronRight className="w-3 h-3 ml-1" />
                                 </Button>
@@ -310,7 +369,10 @@ export function Recognize() {
                               </div>
                               <p className="text-xs text-muted-foreground py-2 mb-2">Фотографии особи {match.newtId}:</p>
                               <PhotoGallery newtId={String(match.newtId)} editable={false} />
-                              <Link href={`/newts/${match.newtId}`}>
+                              <Link
+                                href={`/newts/${match.newtId}`}
+                                onClick={() => setNewtOpenedFromRecognize(String(match.newtId))}
+                              >
                                 <Button size="sm" className="w-full mt-3 gap-2">
                                   Открыть полную карточку <ChevronRight className="w-4 h-4" />
                                 </Button>
