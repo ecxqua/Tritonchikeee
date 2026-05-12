@@ -151,8 +151,6 @@ def patch_card_by_newt_id(
 	}.items() if v
     }
 
-    print(f"{params=} END1")
-    print(f"{filtered_params=} END2")
     print(f"{new_params=} END3")
 
     if not id_service.card_service._update_card(submission_id, **new_params):

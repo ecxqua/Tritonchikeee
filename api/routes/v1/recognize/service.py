@@ -52,6 +52,7 @@ def complete_recognize(
     file_data: FileData,
     scope: str | None,
     project_id: int | None,
+    top_k: int | None,
     id_service: IdentificationService,
     temp: TempStorage
 ) -> Dict[str, Any]:
@@ -77,13 +78,21 @@ def complete_recognize(
         data=file_data.data
     )
 
+    k = top_k if top_k is not None else 5
+    try:
+        k = int(k)
+    except (ValueError, TypeError):
+        k = 5
+    
+    k = max(1, min(k, 100))
+
     try:
         res = id_service.identify_and_prepare(
             image_path=str(path),
             project_ids=[project_id] if project_id else None,
             territory=territories,
             species=species,
-            top_k=5,
+            top_k=k,
             debug=True
         )
 
