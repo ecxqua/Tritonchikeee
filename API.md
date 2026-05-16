@@ -88,7 +88,7 @@ card_service = service.project_service
 Возвращает список всех биологических особей во всей базе данных. 
 
 ```python
-cards: List[Dict[str, Any]] = card_service.get_all_cards()
+all_cards: List[Dict[str, Any]] = card_service.get_all_cards()
 ```
 
 ### Получение всех карточек проекта
@@ -107,7 +107,7 @@ save_result = service.add_new_individual(
     image_path="data/input/image.png",
     project_id=1,
     template_type="ИК-1",  # По факту влияет лишь на формат ввода данных, все досье особей идентичны по полям.
-    **{
+    card_data = {
         'length_body': 55,
         'weight': 3.22,
         'sex': 'М'
