@@ -117,9 +117,6 @@ def get_project_newts(
         first = cards[0]
         last = cards[-1]
 
-        if proto.get("prototype_id") == "NT-R-7":
-            print(cards, "\n", first, '\n', last)
-
         result.append({
             "id": proto.get("prototype_id", None),
             "projectId": proto.get("project_id", None),

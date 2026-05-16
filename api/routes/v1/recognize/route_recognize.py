@@ -17,6 +17,7 @@ async def recognize(
     photo: UploadFile = File(...),  # multipart/form-data request
     scope: str = Form(...),
     projectId: int | None = Form(None),
+    topK: int | None = Form(3),
     id_service=Depends(get_id_service),
     temp=Depends(get_temp)
 ):
@@ -41,6 +42,7 @@ async def recognize(
             file_data,
             scope,
             projectId,
+            topK,
             id_service,
             temp
         )

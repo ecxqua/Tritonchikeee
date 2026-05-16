@@ -66,11 +66,10 @@ def get_cards_by_newt_id(
         if photo_objs:
             first_photo = photo_objs[0]
 
-        print(f"Looking at {card=}")
-
         result.append({
             "cardType": card["template_type"],
             "data": {k: v for k, v in {
+		"species": card.get("species", None),
                 "dateFilled": card.get("date", None),
                 "bodyLength": card.get("length_body", None),
                 "tailLength": card.get("length_tail", None),
@@ -148,9 +147,12 @@ def patch_card_by_newt_id(
             "photo_id": filtered_params.get("bellyPhotoNumber", None),
             "status": filtered_params.get("status", None),
             "water_body_number": filtered_params.get("waterBodyNumber", None),
+	    "species": filtered_params.get("species", None),
 	}.items() if v
     }
-   
+
+    print(f"{new_params=} END3")
+
     if not id_service.card_service._update_card(submission_id, **new_params):
         raise APIError(status=500, msg="Something went wrong")
 

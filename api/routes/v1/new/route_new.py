@@ -37,7 +37,6 @@ async def new(
         ))
 
     params = dict(await request.form())
-
     str_params = {k: v for k, v in params.items() if isinstance(v, str)}
 
     try:

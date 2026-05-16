@@ -55,20 +55,24 @@ ALLOWED_FIELDS = {
     'ИК-1': [
         'date', 'length_body', 'weight', 'sex', 'length_tail',
         'birth_year_exact', 'birth_year_approx', 
-        'origin_region', 'length_device', 'weight_device', 'notes'
+        'origin_region', 'length_device', 'weight_device', 'notes',
+	'species',
     ],
     'ИК-2': [
         'date', 'release_date', 'parent_male_id', 'parent_female_id',
-        'length_total', 'weight', 'water_body_name', 'notes'
+        'length_total', 'weight', 'water_body_name', 'notes',
+	'species',
     ],
     'КВ-1': [
         'date', 'meeting_time', 'length_body', 'length_tail',
         'weight', 'sex', 'status', 'water_body_number',
-        'length_device', 'weight_device', 'notes'
+        'length_device', 'weight_device', 'notes',
+	'species',
     ],
     'КВ-2': [
         'date', 'meeting_time', 'length_total',
-        'status', 'water_body_name', 'notes'
+        'status', 'water_body_name', 'notes',
+	'species',
     ]
 }
 
@@ -207,7 +211,7 @@ def rename_photo(card_id: str, photo_path: str, suffix: str):
     file_parent = str(Path(photo_path).parent)
     logger.info("Родительская папка сохранённого кропа: " + file_parent)
     photo_path = str(Path(photo_path).rename(
-        f"{file_parent}\{photo_name}{file_suffix}"
+        f"{file_parent}" / f"{photo_name}{file_suffix}"
     ))
     return photo_path
 
