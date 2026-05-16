@@ -116,6 +116,52 @@ def init_database():
             FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
         )
     ''')
+
+    # -------------------------------------------------------------------------
+    # ТАБЛИЦА 5: commits (история изменений карты) — FK card_id
+    # -------------------------------------------------------------------------
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS commits (
+            commit_id TEXT PRIMARY KEY,
+            card_id TEXT,
+            species TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            date TEXT,
+            notes TEXT,
+            length_body REAL,
+            length_tail REAL,
+            length_total REAL,
+            weight REAL,
+            sex TEXT,
+            birth_year_exact TEXT,
+            birth_year_approx TEXT,
+            origin_region TEXT,
+            length_device TEXT,
+            weight_device TEXT,
+            parent_male_id TEXT,
+            parent_female_id TEXT,
+            release_date TEXT,
+            water_body_name TEXT,
+            meeting_time TEXT,
+            status TEXT,
+            water_body_number TEXT,
+            FOREIGN KEY(card_id) REFERENCES cards(card_id),
+            FOREIGN KEY(parent_male_id) REFERENCES cards(card_id),
+            FOREIGN KEY(parent_female_id) REFERENCES cards(card_id)
+        )
+    ''')
+
+    # -------------------------------------------------------------------------
+    # ТАБЛИЦА 6: commits-photos (many-to-many) связь для коммитов и добавленных фото.
+    # -------------------------------------------------------------------------
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS commits_photos (
+            commit_id TEXT PRIMARY KEY,
+            photo_id INTEGER,
+            FOREIGN KEY(commit_id) REFERENCES commits(commit_id),
+            FOREIGN KEY(photo_id) REFERENCES photos(photo_id)
+        )
+    ''')
     
     # -------------------------------------------------------------------------
     # ИНДЕКСЫ

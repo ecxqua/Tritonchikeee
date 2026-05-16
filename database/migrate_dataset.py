@@ -147,7 +147,7 @@ def migrate_dataset() -> dict:
         for individual_folder in individual_folders:
             # Формирование ID: NT-K-1-ИК1
             animal_num = individual_folder.name
-            card_id = f"NT-{species_prefix}-{animal_num}-{DEFAULT_TEMPLATE.replace('-', '')}"
+            card_id = f"NT-{species_prefix}-{animal_num}"
             
             # ✅ Проверяем наличие карточки, но НЕ пропускаем фото, если она уже есть
             card_exists = individual_exists(cursor, card_id)

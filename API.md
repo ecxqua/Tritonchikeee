@@ -25,9 +25,10 @@ service.refresh(confirm=True)
 ```python
 result = service.identify_and_prepare(
     image_path="data/input/image.png",
-    project_id=1,
+    project_id=1,  # пустое поле = сковзной поиск
     top_k=5,
-    ...  # Будут параметры для фильтрации!
+    territory=... (str),  # опционально
+    species=... (str),  # опционально
     debug=True
 )
 ```
@@ -43,18 +44,16 @@ upload_id = result['upload_id']  # Получаем upload_id
 
 `decision`: решение биолога
 * 'NEW': новая особь, заполняем карточку особи.
-* 'MATCH': известная особь, заполняем карточку повторной встречи.
+* 'MATCH': известная особь, заполняем карточку (коммит для фиксации состояния особи, изменяет поля карточки особи и отражается в её истории, по факту просто вариант редактирования особи).
 * 'CANCEL': отмена операции.
 
-`prototype_id`: id особи (NT-K-1)
+`card_id`: id особи (NT-K-1)
 
-У каждой особи может быть несколько карточек различных типов (КВ-1/ИК-1).
+У каждой особи ЛИШЬ ОДНА КАРТОЧКА, но есть история коммитов. Заполнение картчоки для сущетсвующей особи (MATCH) это коммит.
 
 `template_type`: тип карточки (КВ-1)
 
-`card_id` (здесь не используется, но для справки): id карточки особи (NT-K-1-КВ1)
-
-`**card_data`: аргументы для заполнения карточки, у каждого типа
+`card_data`: аргументы для заполнения карточки, у каждого типа
 карточки есть свои обязательные поля, которые высветятся в ошибке, если их не достаёт.
 
 ```python
@@ -63,7 +62,7 @@ confirm = service.confirm_decision(
     decision='NEW',
     template_type="ИК-1",
     species="Карелина",
-    **{
+    card_data = {
         'length_body': 55,
         'weight': 3.22,
         'sex': 'М'
@@ -82,16 +81,14 @@ Returns:
 
 ```python
 card_service = service.project_service
-# Получаем подсерсив работы с проектами
-# Криво я знаю Т_Т
 ```
 
-### Получение всех особей (не карточек) в базе
+### Получение всех карточек (особей) в базе
 
-Возвращает список всех прототипов (биологических особей) во всей базе данных. Группирует карточки по prototype_id. Проверяет глобальную целостность архитектуры.
+Возвращает список всех биологических особей во всей базе данных. 
 
 ```python
-prototypes: List[Dict[str, Any]] = card_service.get_all_prototypes()
+cards: List[Dict[str, Any]] = card_service.get_all_cards()
 ```
 
 ### Получение всех карточек проекта
@@ -103,13 +100,13 @@ all_cards: List[Dict[str, Any]] = card_service.get_cards_by_project(
 ```
 
 ### ВАЖНО! Для CREATE используйте только методы identification_service!
-### Добавление карточки новой особи (ИК-1/ИК-2)
+### Добавление карточки новой особи
 ```python
 save_result = service.add_new_individual(
     species="Карелина",
     image_path="data/input/image.png",
     project_id=1,
-    template_type="ИК-1",
+    template_type="ИК-1",  # По факту влияет лишь на формат ввода данных, все досье особей идентичны по полям.
     **{
         'length_body': 55,
         'weight': 3.22,
@@ -131,64 +128,38 @@ Returns Dict[str, Any]:
     error: сообщение об ошибке
 ```
 
-### Добавление карточки повторной встречи с особью (КВ-1/КВ-2)
+### Коммит (история изменений).
+Редактировать карточку можно только посредством коммита.
+Коммит работает так же, как и создание особи. Это заполнение карточки определённого типа, НО С УКАЗАНИЕМ id карточки особи. Опять, у особи только одна карточка.
+
+Коммит может принимать на обработку пакет фотографий особи.
 ```python
-save_result = service.add_encounter(
-    prototype_id="NT-K-2",
-    template_type="КВ-1",
-    species="Карелина",
-    image_path="data/input/image.png",
-    **{
-        "status": "жив",
-        "water_body_number": 0.5,
-        "length_body": 0.4,
-        "length_tail": 0.1
+result = service.commit_card(
+    card_id=card_id,
+    template_type="ИК-1",
+    image_paths=[...],  # опционально
+    card_data = {
+        'weight': 67  # Новые значения полей.
     }
 )
+
 ```
 ```python
 Modes:
-    image_path: обработка полного фото (ещё не вырезано)
-    process_result: обработка с уже полученным вырезанным брюшком и эмбеддингом
+    image_paths: обработка полных фото (ещё не вырезано)
+    process_results: обработка с уже полученным вырезанными брюшками и эмбеддингами. Лист словарей.
 ```
 ```python
-Returns Dict[str, Any]:
-    crop_path: путь к вырезанному брюшку
-    full_path: путь к полному фото
-    success: успешность операции
-    card_id: id сохранённой карточки
-    error: сообщение об ошибке
+Returns:
+    Dict:
+        - success: bool
+        - error:
 ```
 
-### Добавление нового фото к карточке
-```python
-save_result = service.add_photo_to_card(
-    card_id="NT-K-1-ИК1",
-    image_path="data/input/image.png"
-)
-```
-```python
-Returns Dict[str, Any]:
-    crop_path: путь к вырезанному брюшку
-    success: успешность операции
-    error: сообщение об ошибке
-```
-### ВАЖНО! Для UPDATE используйте только методы из indentification_service
-### Обновление существующей карточки
-
-`**kwargs`: заполнение полей для обновления
-
-`card_id`: id карточки (NT-K-1-КВ1, `prototype_id`-`template_type`)
-```python
-result = service.update_card(
-    card_id="NT-R-9-ИК1"
-    **{"weight": 1}
-)
-```
-
-### ВАЖНО! Для DELETE используйте только методы из indentification_service
-### Удаление карточки
-
+### ВАЖНО! Для UPDATE используйте только методы из indentification_service.
+Конкретно для обновелния данных особей используется ТОЛЬКО СИСТЕМА КОММИТОВ. Заметьте, что тип шаблона для коммита можно не указывать. Тогда отключится система валидации полей по шаблонам. Это полезно, если коммит просто изменяет определённое поле или сразу множество полей из различных шаблонов. У особи в бд все поля активны ВСЕГДА. Шаблоны это надстрйока для удобства и бизнес-логики заполнения.
+### Удаление карточки (особи).
+ 
 `card_id`: id карточки (NT-K-1-КВ1, `prototype_id`-`template_type`)
 
 `delete_photos`: удалять фото, связанные с карточкой (по умолчанию True, рекомендую оставить)
@@ -197,21 +168,11 @@ result = service.update_card(
 
 ```python
 result = service.delete_card(
-    card_id="NT-K-88-ИК1",
+    card_id="NT-K-88",
     confirm=True
 )
 ```
 
-### Удаление особи (всех карточек особи)
-`card_id`: id особи (NT-K-1)
-
-`confirm`: подтверждение операции
-```python
-result = service.delete_prototype(
-    prototype_id="NT-K-2",
-    confirm=True
-)
-```
 
 ### Удаление фотографии, привязнной к карточке
 `photo_id`: id фото в таблице photos, можно получить GET методами (см. в card_service)
@@ -228,8 +189,6 @@ result = service.delete_photo(
 
 ```python
 project_service = service.project_service
-# Получаем подсерсив работы с проектами
-# Криво я знаю Т_Т
 ```
 
 ### Создание нового проекта или получение `project_id`

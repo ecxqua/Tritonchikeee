@@ -9,7 +9,7 @@ service = create_identification_service()
 print("Старт обработки")
 start_time = time.time()
 
-# 2. Анализ
+# 2. Шаг 1: Анализ
 result = service.identify_and_prepare(
     image_path="data/input/image.png",
     top_k=5,
@@ -21,12 +21,21 @@ print(result["candidates"])
 if result['success']:
     print(f"Upload ID: {result['upload_id']}")
     print(f"Кандидатов: {len(result['candidates'])}")
+    
     # 3. Пользователь видит кандидатов и принимает решение
     
-    # 4. Отмена операции
+    # 4. Шаг 2: Подтверждение (НОВАЯ ОСОБЬ)
     confirm = service.confirm_decision(
         upload_id=result['upload_id'],
-        decision='CANCEL'
+        project_id=service.project_service.get_or_create_project("Новый"),
+        decision='NEW',
+        template_type="ИК-1",
+        species="Карелина",
+        card_data = {
+            'length_body': 55,
+            'weight': 3.22,
+            'sex': 'М'
+        }
     )
 
 print("Финальное время обработки: ", time.time() - start_time)

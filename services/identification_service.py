@@ -21,6 +21,7 @@ services/identification_service.py — Оркестратор идентифик
 """
 
 import logging
+from warnings import deprecated
 from pathlib import Path
 from datetime import datetime
 from typing import Optional, List, Dict, Any
@@ -35,7 +36,7 @@ import sqlite3
 from pipeline.deployment_yolo_new import process_single_image_sync
 from pipeline.deployment_dinov2_faiss import load_model, get_embedding, get_embedding_from_array, DEFAULT_TRANSFORM, search_vectors
 from services.embedding_service import EmbeddingService
-from services.card_service import CardService, extract_prototype_id, form_card_id, REQUIRED_FIELDS
+from services.card_service import CardService, extract_prototype_id, form_card_id, REQUIRED_FIELDS, validate_template_fields
 from services.upload_service import UploadService
 from services.project_service import ProjectService
 
@@ -243,8 +244,8 @@ class IdentificationService:
             prototypes = self._load_prototypes(project_ids)
             
             candidates = []
-            if prototypes['prototype_ids']:
-                logger.info(f"Найдено {len(prototypes['prototype_ids'])} особей для поиска")
+            if prototypes['card_ids']:
+                logger.info(f"Найдено {len(prototypes['card_ids'])} особей для поиска")
                 candidates = self._search_similar(process_result['embedding'], prototypes, top_k)
                 result['candidates'] = candidates
             else:
@@ -273,9 +274,9 @@ class IdentificationService:
         decision: str,
         project_id: Optional[int] = None,
         species: Optional[str] = "Карелина",
-        prototype_id: Optional[str] = None,
+        card_id: Optional[str] = None,
         template_type: Optional[str] = None,
-        **card_data: Dict[str, Any]
+        card_data: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         """
         Подтвердить решение пользователя (Two-Phase Commit Шаг 2).
@@ -286,7 +287,7 @@ class IdentificationService:
             project_id: Проект, куда сохранить тритона ('NEW')
             species: вид тритона: "Карелина", "Ребристый" (для NEW, MATCH)
             card_data: Данные карточки (для NEW и MATCH)
-            prototype_id: ID существующей особи (для MATCH)
+            card_id: ID существующей карточки особи (для MATCH)
             template_type: тип шаблона для карточки (для NEW, MATCH)
         
         Returns:
@@ -324,7 +325,7 @@ class IdentificationService:
                     project_id=project_id,
                     template_type=template_type,
                     process_result=process_result,
-                    **card_data
+                    card_data=card_data
                 )
                 card_id = add_result['card_id']
                 self.upload_service.complete_upload(upload_id=upload['id'], card_id=card_id)
@@ -332,17 +333,16 @@ class IdentificationService:
                 result['message'] = f"Создана новая особь: {card_id}"
                 
             elif decision == 'MATCH':
-                # === ПОВТОРНАЯ ВСТРЕЧА ===
-                if not prototype_id or not template_type:
+                # === СОЗДАТЬ КАРТОЧКУ К СУЩЕСТВУЮЩЕЙ ОСОБИ ===
+                if not card_id or not template_type:
                     result['message'] = "Не указан card_id или template_type для MATCH"
                     return result
                 
-                add_result = self.add_encounter(
-                    prototype_id=prototype_id,
+                add_result = self.commit_card(
+                    card_id=card_id,
                     template_type=template_type,
-                    species=species,
-                    process_result=process_result,
-                    **card_data
+                    process_results=[process_result],
+                    card_data=card_data
                 )
                 card_id = add_result['card_id']
                 self.upload_service.complete_upload(upload_id=upload['id'], card_id=card_id)
@@ -469,86 +469,15 @@ class IdentificationService:
 
     # ==========================================================================
     # CREATE
-    # ==========================================================================
-
-    def add_photo_to_card(
-        self,
-        card_id: str,
-        image_path: Optional[str] = None,
-        process_result: Optional[Dict[str, Any]] = None
-    ) -> Dict[str, Any]:
-        """
-        Обработать фото и связать его с существующей карточкой (кроп + эмбеддинг + сохранение + индекс).
-        
-        Modes:
-            image_path: обработка полного фото (ещё не вырезано)
-            process_result: обработка с уже полученным вырезанным брюшком и эмбеддингом
-        
-        Args:
-            image_path: полное изображение обработки (не указывать только при наличии process_result).
-            card_id: id карточки для добавления фото.
-            process_result: Если обработка уже была совершена, то можно подгрузить данные:
-            {
-                embedding: эмбеддинг фото
-                crop_path: путь к вырезанному брюшку
-                full_path: путь к полному фото
-            }
-            По умолчанию обработка совершается.
-        
-        Returns Dict[str, Any]:
-            crop_path: путь к вырезанному брюшку
-            photo_id: id добавленного фото в photos
-            success: успешность операции
-            error: сообщение об ошибке
-        """
-        result: Dict[str, Any] = {
-            'crop_path': None,
-            'photo_id': None,
-            'success': False,
-            'error': None
-        }
-        # Обработка
-        if not process_result:
-            process_result = self.get_crop_and_embedding(image_path)
-            if process_result['error']:
-                result['error'] = process_result['error']
-                return result
-        
-        result['card_id'] = card_id
-        
-        # Добавление фото в БД
-        save_result = self.card_service._add_photo_to_card(process_result['crop_path'], card_id=card_id)
-        
-        if save_result['success']:
-            # Добавить embedding в FAISS через embedding_service
-            embedding_index = self.embedding_service.add(
-                process_result['embedding'],
-                {
-                    'card_id': card_id,
-                    'photo_path': save_result['crop_path'],
-                },
-                photo_id=save_result['photo_id']
-            )
-            self.embedding_service.commit()
-            
-            # Обновить photos.embedding_index в БД
-            self._update_photo_embedding_index(save_result['crop_path'], embedding_index)
-
-            result['success'] = True
-            result['crop_path'] = save_result['crop_path']
-            return result
-        else:
-            result['error'] = save_result['error']
-            return result
-        
+    # ========================================================================== 
     def add_new_individual(
         self,
         species: str,
+        card_data: Dict[str, Any],
         project_id: Optional[int] = None,
         template_type: str = "ИК-1",
         image_path: Optional[str] = None,
         process_result: Optional[Dict[str, Any]] = None,
-        **card_data
     ):
         """
         Обработать фото и создать запись в базах данных (кроп + эмбеддинг + сохранение + индекс).
@@ -606,7 +535,7 @@ class IdentificationService:
             template_type=template_type,
             species=species,
             project_id=project_id,  # 🔥 FK
-            **card_data
+            card_data=card_data
         )
         card_id = save_result['card_id']
         result['card_id'] = card_id
@@ -629,90 +558,6 @@ class IdentificationService:
         result['crop_path'] = save_result['crop_path']
         return result
 
-    def add_encounter(
-        self,
-        prototype_id: str,
-        template_type: str,
-        species: str,
-        image_path: Optional[str] = None,
-        process_result: Optional[Dict[str, Any]] = None,
-        **card_data
-    ) -> Dict[str, Any]:
-        """
-        Обработать фото и создать запись о повторной встрече в базах данных
-        (кроп + эмбеддинг + сохранение + индекс).
-        Не включает вывод кандидатов. Создаёт повторную картчоку (КВ-1/КВ-2)
-
-        Args:
-            image_path (str): фото для кропа и добавления (не указывать только при наличии process_result)
-            prototype_id (str): id особи (не карточка) вида NT-K-13 (без типа карточки)
-            template_type (str): тип карточки (КВ-1/КВ-2)
-            species (str): вид особи: "Карелина", "Ребристый"
-            process_result: Если обработка уже была совершена, то можно подгрузить данные:
-                {
-                    embedding: эмбеддинг фото
-                    crop_path: путь к вырезанному брюшку
-                    full_path: путь к полному фото
-                }
-            **card_data (dict или аргументы): данные для заполнения карточки.
-
-        Returns Dict[str, Any]:
-            crop_path: путь к вырезанному брюшку
-            full_path: путь к полному фото
-            success: успешность операции
-            card_id: id сохранённой карточки
-            error: сообщение об ошибке
-        """
-        result: Dict[str, Any] = {
-            'crop_path': None,
-            'full_path': None,
-            'card_id': None,
-            'success': False,
-            'error': None
-        }
-        # Обработка
-        if not process_result:
-            if not image_path:
-                raise ValueError(
-                    "Нет фото или результатов"
-                    " для обработки и добавления особи."
-                )
-            process_result = self.get_crop_and_embedding(image_path)
-            if process_result['error']:
-                result['error'] = process_result['error']
-                return result
-
-        card_id = form_card_id(prototype_id, template_type)
-        
-        # Добавить встречу через card_service (БЕЗ FAISS)
-        # Внутри card_service СОХРАНЯЕТС ФОТОГРАФИЯ НА ДИСКЕ
-        save_result = self.card_service._add_encounter(
-            prototype_id=prototype_id,
-            template_type=card_data.get('template_type', 'КВ-1'),
-            species=species,
-            photo_path_cropped=process_result['crop_path'],
-            **card_data
-        )
-        
-        # Добавить embedding в FAISS
-        embedding_index = self.embedding_service.add(
-            process_result['embedding'],
-            {
-            'card_id': card_id,
-            'photo_path': save_result['crop_path']
-            },
-            photo_id=save_result['photo_id']
-        )
-        self.embedding_service.commit()
-        
-        # Обновить photos.embedding_index в БД
-        self._update_photo_embedding_index(save_result['crop_path'], embedding_index)
-
-        result['success'] = True
-        result['crop_path'] = save_result['crop_path']
-        result['card_id'] = card_id
-        return result
-
     # ==========================================================================
     # DELETE
     # ==========================================================================
@@ -723,7 +568,7 @@ class IdentificationService:
         delete_photos: bool = True,
         confirm: bool = False
     ):
-        """Удалить карточку особи (не все карточки особи, а конкретную) (+ FAISS)
+        """Удалить карточку особи (+ FAISS)
 
         Args:
             card_id (str): id карточки вида NT-K-1-ИК1
@@ -758,46 +603,6 @@ class IdentificationService:
                     result['error'] = "Ошибка удаления из FAISS. Вектор не найден"
                     return result
 
-            result['success'] = True
-            return result
-        else:
-            result['error'] = "Необходимо подтверждение операции"
-            return result
-
-    def delete_prototype(
-        self,
-        prototype_id: str,
-        confirm: bool = False
-    ):
-        """Удалить особь со всеми карточками и фотографиями (+ FAISS)
-
-        Args:
-            prototype_id (str): id особи вида NT-K-25 (без уточнения типа карточки)
-            confirm (bool): обязательное подтверждение удаления
-
-        Returns:
-            Dict:
-                - success: bool
-                - error: str
-        """
-        result = {
-            "success": False,
-            "error": None
-        }
-        if confirm:
-            card_ids = self.card_service.get_matching_card_ids(prototype_id=prototype_id)
-            for card_id in card_ids:
-                delete_result = self.delete_card(
-                    card_id=card_id,
-                    delete_photos=True,
-                    confirm=confirm
-                )
-                if not delete_result['success']:
-                    result['error'] = delete_result['error']
-                    return result
-
-            logger.info(f"Особь {prototype_id} удалена")
-            logger.info(f"Удалённые карточки особи: {card_ids}")
             result['success'] = True
             return result
         else:
@@ -843,12 +648,37 @@ class IdentificationService:
     # ==========================================================================
     # UPDATE
     # ==========================================================================
-    def update_card(self, card_id: str, **card_data) -> Dict[str, Any]:
-        """Обновляет данные существующей карточки
+    def commit_card(
+        self,
+        card_id: str,
+        card_data: Optional[dict] = {},
+        template_type: Optional[str] = None,
+        image_paths: Optional[list[str]] = None,
+        process_results: Optional[list[Dict[str, Any]]] = None,
+    ) -> Dict[str, Any]:
+        """Изменение данных уникальной карточки особи коммитом (история)
+        (+ обработка добавления фотографии)
+
+        см. issues История изменений тритонов #23
+        Для редактирования полей особи используется только эта функция
 
         Args:
-            card_id (str): id карточки, которую нужно изменить (у одной особи много карточек)
-            **kwargs: словарь с полями для изменения
+            card_id (str): id карточки, которую нужно изменить.
+            template_type (str): тип заполненной карточки (None, если микроизменение).
+                Микроизменение позволяет вносить изменения без ограничений
+                валидации типа карточки (полезно для редактирования случайных полей).
+            image_paths: изображения для анализа и добавления в коммите.
+            process_results: проанализированный пакет изображенный.
+                [{
+                    embedding: эмбеддинг фото
+                    crop_path: путь к вырезанному брюшку
+                    full_path: путь к полному фото
+                }, ... ]
+                Пакет собирается из результатов обработки отдельных фото.
+                Словарь обработки отдельного фото можно подать в виде
+                ответа функции обработки
+                identify_and_prepare().
+            **kwargs: словарь с полями для изменения в коммите.
 
         Returns:
             Dict:
@@ -859,12 +689,64 @@ class IdentificationService:
             "success": False,
             "error": None
         }
+        # Валидатор работает заранее
+        if template_type and card_data:
+            card_data = validate_template_fields(
+                template_type,
+                card_data,
+                False
+            )
 
-        update_result = self.card_service._update_card(
+        # Обработка фотографий (если есть).
+        if not process_results:
+            process_results = list()
+            if image_paths:
+                for image_path in image_paths:
+                    process_result = self.get_crop_and_embedding(image_path)
+                    if process_result['error']:
+                        result['error'] = process_result['error']
+                        return result
+                    process_results.append(process_result)
+
+        # 1. Добавление фотографий в индекс эмбеддингов.
+        added_photo_ids = list()
+        if process_results:
+            for process_result in process_results:
+                save_result = self.card_service._add_photo_to_card(
+                    process_result['crop_path'],
+                    card_id=card_id
+                )
+
+                if save_result['success']:
+                    # Добавить embedding в FAISS через embedding_service
+                    photo_id = save_result['photo_id']
+                    embedding_index = self.embedding_service.add(
+                        process_result['embedding'],
+                        {
+                            'card_id': card_id,
+                            'photo_path': save_result['crop_path'],
+                        },
+                        photo_id=photo_id
+                    )
+                    self.embedding_service.commit()
+                    
+                    # Обновить photos.embedding_index в БД
+                    self._update_photo_embedding_index(save_result['crop_path'], embedding_index)
+
+                    result['success'] = True
+                    result['crop_path'] = save_result['crop_path']
+                    added_photo_ids.append(photo_id)
+                else:
+                    result['error'] = save_result['error']
+                    return result
+
+        # 2. Обновление полей карточки с занесением в историю.
+        update_result = self.card_service._commit_card(
             card_id=card_id,
-            **card_data
+            template_type=template_type,
+            added_photo_ids=added_photo_ids,
+            card_data=card_data
         )
-        # Удаление фото из FAISS
         if update_result:
             result['success'] = True
             return result
@@ -924,24 +806,26 @@ class IdentificationService:
         for proj in projects_to_process:
             pid = proj['id']
             try:
-                protos = self.card_service.get_prototypes_by_project(pid)
+                protos = self.card_service.get_cards_by_project(pid)
                 all_prototypes.extend(protos)
             except ValueError:
                 logger.warning(f"Пропущен проект {pid}: нарушение целостности данных")
                 continue
                 
         if not all_prototypes:
-            return {'prototype_ids': [], 'embeddings': np.array([]), 'metadata': {}}
+            return {'card_ids': [], 'embeddings': np.array([]), 'metadata': {}}
             
-        prototype_ids = []
+        card_ids = []
         prototype_embeddings = []
         metadata = {}
 
         for proto in all_prototypes:
-            proto_id = proto['prototype_id']
+            print(proto)
+            card_id = proto['card_id']
             
-            # Получаем все фото всех карточек прототипа
-            photos = self.card_service.get_prototype_photos(proto_id)
+            # Получаем все фото всех карточки прототипа
+            photos = self.card_service.get_card_photos(card_id)
+            print(photos[0]["embedding_index"])
             
             # Фильтр: только кропы с валидным embedding_index
             valid_indices = [
@@ -958,6 +842,7 @@ class IdentificationService:
                 emb = self.embedding_service.get_embedding_by_index(idx)
                 if emb is not None:
                     embeddings_list.append(emb)
+            print(len(embeddings_list))
 
             if not embeddings_list:
                 continue
@@ -968,31 +853,15 @@ class IdentificationService:
             if norm > 1e-12:
                 avg_emb = avg_emb / norm
                 
-            prototype_ids.append(proto_id)
+            card_ids.append(card_id)
             prototype_embeddings.append(avg_emb)
             
-            # Метаданные по всем карточкам особи
-            metadata[proto_id] = {
-                'species': proto.get('species'),
-                'project_id': proto.get('project_id'),
-                'project_name': project_names.get(proto.get('project_id'), 'Unknown'),
-                'cards': [
-                    {
-                        'card_id': c['card_id'],
-                        'template_type': c['template_type'],
-                        'photo_count': sum(1 for p in photos if p['card_id'] == c['card_id'] and p.get('embedding_index') not in (None, -1))
-                    }
-                    for c in proto.get('cards', [])
-                ]
-            }
-            
         embeddings_array = np.array(prototype_embeddings) if prototype_embeddings else np.array([])
-        logger.info(f"Загружено прототипов: {len(prototype_ids)}, форма: {embeddings_array.shape}")
+        logger.info(f"Загружено прототипов: {len(card_ids)}, форма: {embeddings_array.shape}")
         
         return {
-            'prototype_ids': prototype_ids,
+            'card_ids': card_ids,
             'embeddings': embeddings_array,
-            'metadata': metadata
         }
     
     def _search_similar(
@@ -1012,7 +881,7 @@ class IdentificationService:
         Returns:
             List[Dict]: Кандидаты с метаданными
         """
-        if not prototypes['prototype_ids']:
+        if not prototypes['card_ids']:
             return []
         
         # Поиск через pipeline (чистая математика)
@@ -1026,14 +895,10 @@ class IdentificationService:
         candidates = []
         for idx, distance in zip(top_indices, top_distances):
             similarity = float(-distance)
-            ind_id = prototypes['prototype_ids'][idx]
-            meta = prototypes['metadata'].get(ind_id, {})
+            ind_id = prototypes['card_ids'][idx]
             
             candidates.append({
-                'prototype_id': ind_id,
-                'species': meta.get('species', 'Unknown'),
-                'template_type': meta.get('template_type', 'Unknown'),
-                'project_name': meta.get('project_name', 'Unknown'),  # Для отображения
+                'card_id': ind_id,
                 'similarity': similarity,
                 'similarity_percent': similarity * 100
             })

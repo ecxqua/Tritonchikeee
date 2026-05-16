@@ -4,7 +4,7 @@ services/card_service.py — CRUD операции для карточек ос�
 Архитектурные принципы:
     1. CRUD для cards и photos (проекты — в project_service.py)
     2. Нет прямого доступа к FAISS → вызываем EmbeddingService
-    3. Prototypes - особи, cards - карточки особей
+    3. cards - уникальные карточки особей
     4. Валидация полей карточек
 
 Зависимости:
@@ -14,6 +14,7 @@ services/card_service.py — CRUD операции для карточек ос�
 """
 
 import logging
+from warnings import deprecated
 from pathlib import Path
 from datetime import datetime
 import sqlite3
@@ -71,6 +72,14 @@ ALLOWED_FIELDS = {
     ]
 }
 
+ALLOWED_COMMIT_FIELDS = {
+    'species', 'date', 'notes', 'length_body', 'length_tail', 'length_total',
+    'weight', 'sex', 'birth_year_exact', 'birth_year_approx', 'origin_region',
+    'length_device', 'weight_device', 'parent_male_id', 'parent_female_id',
+    'release_date', 'water_body_name', 'meeting_time', 'status', 'water_body_number'
+}
+
+
 SPECIES_PREFIX = {
     'Карелина': 'K',
     'Гребенчатый': 'R',
@@ -88,7 +97,7 @@ def get_db_connection(db_path: str = DB_PATH) -> sqlite3.Connection:
     return conn
 
 # ВАЛИДАТОР
-def _validate_template_fields(
+def validate_template_fields(
         template_type: str,
         card_data: dict,
         require: bool = True
@@ -160,19 +169,15 @@ def get_next_prototype_number(cursor: sqlite3.Cursor, species: str) -> int:
 def generate_card_id(
     cursor: sqlite3.Cursor, 
     species: str, 
-    template_type: str, 
-    prototype_id: Optional[str] = None
 ) -> str:
     """Генерирует ID карточки. Ищет СВОБОДНЫЙ ID."""
     prefix = SPECIES_PREFIX.get(species, 'X')
-    template_short = template_type.replace("-", "")
     
-    if prototype_id is None:
-        prototype_id = f"NT-{prefix}-{get_next_prototype_number(cursor, species)}"
+    prototype_id = f"NT-{prefix}-{get_next_prototype_number(cursor, species)}"
     
     attempts = 0
     while attempts < 1000:
-        card_id = f"{prototype_id}-{template_short}"
+        card_id = f"{prototype_id}"
         cursor.execute('SELECT card_id FROM cards WHERE card_id = ?', (card_id,))
         if not cursor.fetchone():
             return card_id
@@ -219,13 +224,14 @@ def extract_prototype_id(card_id: str) -> str:
 
 def form_card_id(prototype_id: str, template_type: str):
     """
+    (LEGACY)
     Формируем пару id+template_type
 
     Args:
         prototype_id (str): номер id особи (NT-K-13)
         template_type (str): шаблон карточки (КВ-1/ИК-1)
     """
-    return prototype_id + "-" + template_type.replace("-", "")
+    return prototype_id
 
 # =============================================================================
 # CARD SERVICE — Основная бизнес-логика
@@ -270,13 +276,12 @@ class CardService:
     def _save_new_individual(
         self,
         photo_path_cropped: Optional[str],
+        card_data: Dict[str, Any],
         species: str = "Карелина",
         project_id: Optional[int] = None,
         template_type: str = "ИК-1",
-        card_id: Optional[str] = None,
         photo_number: Optional[str] = None,
         is_legacy: bool = False,
-        **card_data
     ) -> Dict[str, Any]:
         """
         Сохраняет новую особь в базу данных (основная карточка + фотографии).
@@ -301,20 +306,19 @@ class CardService:
         """
         result = {
             "crop_path": photo_path_cropped,
-            "card_id": card_id,
+            "card_id": None,
             "photo_id": None,
             "success": False,
             "error": None
         }
-        card_data = _validate_template_fields(template_type, card_data)
+        card_data = validate_template_fields(template_type, card_data)
         
         conn = get_db_connection(self.db_path)
         cursor = conn.cursor()
         
-        if card_id is None:
-            # Генерируем card_id с учётом template_type
-            card_id = generate_card_id(cursor, species, template_type)
-            result['card_id'] = card_id
+        # Генерируем card_id с учётом template_type
+        card_id = generate_card_id(cursor, species)
+        result['card_id'] = card_id
         # Сохраняем фотографию.
         if photo_path_cropped:
             photo_path_cropped = rename_photo(card_id, photo_path_cropped, suffix="cropped")
@@ -353,6 +357,41 @@ class CardService:
                 card_data.get('meeting_time'), card_data.get('status'),
                 card_data.get('water_body_number')
             ))
+
+            # Создание коммита инициализации.
+            commit_id = str(uuid.uuid4())
+            commit_fields = {
+                'commit_id': commit_id,
+                'card_id': card_id,
+                'species': card_data.get('species'),
+                'date': card_data.get('date'),
+                'notes': card_data.get('notes'),
+                'length_body': card_data.get('length_body'),
+                'length_tail': card_data.get('length_tail'),
+                'length_total': card_data.get('length_total'),
+                'weight': card_data.get('weight'),
+                'sex': card_data.get('sex'),
+                'birth_year_exact': card_data.get('birth_year_exact'),
+                'birth_year_approx': card_data.get('birth_year_approx'),
+                'origin_region': card_data.get('origin_region'),
+                'length_device': card_data.get('length_device'),
+                'weight_device': card_data.get('weight_device'),
+                'parent_male_id': card_data.get('parent_male_id'),
+                'parent_female_id': card_data.get('parent_female_id'),
+                'release_date': card_data.get('release_date'),
+                'water_body_name': card_data.get('water_body_name'),
+                'meeting_time': card_data.get('meeting_time'),
+                'status': card_data.get('status'),
+                'water_body_number': card_data.get('water_body_number'),
+                'created_at': datetime.now().isoformat(),
+            }
+
+            # Динамический INSERT
+            cols = list(commit_fields.keys())
+            placeholders = ', '.join(['?' for _ in cols])
+            query = f"INSERT INTO commits ({', '.join(cols)}) VALUES ({placeholders})"
+            cursor.execute(query, [commit_fields[c] for c in cols])
+            logger.info(f"Коммит к особи {card_id} создан")
             
             # === ТАБЛИЦА 2: photos (кроп брюшка) ===
             if photo_path_cropped:
@@ -463,126 +502,77 @@ class CardService:
     # -------------------------------------------------------------------------
     # UPDATE
     # -------------------------------------------------------------------------
-    
-    def _add_encounter(
+    def _commit_card(
         self,
-        prototype_id: str,
-        template_type: str,
-        species: str = "Карелина",
-        photo_path_cropped: Optional[str] = None,
-        **card_data
-    ) -> Dict[str, Any]:
-        """
-        Добавляет НОВУЮ ВСТРЕЧУ (КВ-1/КВ-2) для существующей особи (карточка повторной встречи)
-
-        Args:
-            prototype_id (str): id особи (не карточка) вида NT-K-13 (без типа карточки)
-            template_type (str): тип карточки (КВ-1/КВ-2)
-            photo_path_full (str): путь к полной фотографии особи (исходник)
-            photo_path_cropped (str): путь к вырезанному брюшку
-            **card_data (dict или аргументы): данные для заполнения карточки.
-
-        Returns Dict[str, Any]:
-            crop_path: путь к вырезанному брюшку
-            success: успешность операции
-            card_id: id сохранённой карточки
-            photo_number: номер добавленного фото среди фото карточки
-            photo_id: id добавленного фото в photos
-            error: сообщение об ошибке
-        """
-        result = {
-            "crop_path": photo_path_cropped,
-            "card_id": None,
-            "photo_number": None,
-            "photo_id": None,
-            "success": False,
-            "error": None
-        }
-        if template_type not in ['КВ-1', 'КВ-2']:
-            raise ValueError("Для добавления встречи используйте шаблоны КВ-1 или КВ-2")
-        
-        card_data = _validate_template_fields(template_type, card_data)
-
-        # Правильно генерируем ID новой особи.
-        # NT-K-13 -> NT-K-13-КВ1
-        card_id = form_card_id(prototype_id, template_type)
-        result['card_id'] = card_id
-        # Сохраняем фотографию
-        if photo_path_cropped:
-            photo_path_cropped = rename_photo(card_id, photo_path_cropped, suffix="cropped")
-            result['crop_path'] = photo_path_cropped
+        card_id: str,
+        template_type: Optional[str] = None,
+        added_photo_ids: Optional[list[int]] = None,
+        card_data: Optional[dict] = None
+    ) -> bool:
+        """Обновляет данные существующей карточки коммитом (история)."""
+        # if not card_data:
+        #     logger.warning("Нет полей для обновления")
+        #     return False
+        # Валидация полей (если нужна).
+        # card_data = dict()
+        # if template_type:
+        #     card_data = validate_template_fields(template_type, kwargs, False)
 
         conn = get_db_connection(self.db_path)
         cursor = conn.cursor()
-        photo_number = _get_next_photo_number(cursor, card_id)
+
+        if card_data:
+            fields = [f"{key} = ?" for key in card_data.keys()]
+            values = list(card_data.values()) + [card_id]
+            query = f"UPDATE cards SET {', '.join(fields)} WHERE card_id = ?"
+            cursor.execute(query, values)
+        # 2. Создаём коммит — снапшот состояния ПОСЛЕ обновления
+        commit_id = str(uuid.uuid4())
         
-        # Получаем project_id из существующей особи
-        cursor.execute('SELECT project_id FROM cards WHERE card_id = ?', (card_id,))
-        row = cursor.fetchone()
-        project_id = row['project_id'] if row else 1
-        
-        try:
-            cursor.execute('''
-                INSERT INTO cards (
-                    card_id, template_type, species, project_id,
-                    date, meeting_time, status, water_body_number, water_body_name,
-                    length_body, length_tail, length_total, weight, sex, notes,
-                    created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (
-                card_id, template_type, species, project_id,
-                card_data.get('date', datetime.now().strftime("%d.%m.%Y")),
-                card_data.get('time'), card_data.get('status'),
-                card_data.get('water_body_number'), card_data.get('water_body_name'),
-                card_data.get('length_body'), card_data.get('length_tail'),
-                card_data.get('length_total'), card_data.get('weight'),
-                card_data.get('sex'), card_data.get('notes'),
-                datetime.now().isoformat()
-            ))
-            
-            if photo_path_cropped:
-                cursor.execute('''
-                    INSERT INTO photos (card_id, photo_type, photo_number, photo_path, date_taken, is_main, is_processed, embedding_index, is_legacy)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ''', (card_id, 'cropped', photo_number, photo_path_cropped, card_data.get('date'), 0, 1, -1, 0))
-                # Сохраняем photo_id
-                result['photo_id'] = cursor.lastrowid
-            conn.commit()
-            
-            logger.info(f"Встреча {template_type} добавлена к особи {card_id}")
-            result['photo_number'] = photo_number
-            result['success'] = True
-            return result
-        except sqlite3.IntegrityError as e:
-            conn.rollback()
-            logger.error(f"Ошибка указания ID. Возможно, запись с таким ID уже есть!")
-            raise sqlite3.IntegrityError("Ошибка указания ID. Возможно, запись с таким ID уже есть!")
-        except Exception as e:
-            conn.rollback()
-            logger.error(f"Ошибка добавления встречи: {e}")
-            raise e
-        finally:
-            conn.close()
-    
-    def _update_card(self, card_id: str, **kwargs) -> bool:
-        print(card_id)
-        print(self.get_card(card_id))
-        """Обновляет данные существующей карточки."""
-        if not kwargs:
-            logger.warning("Нет полей для обновления")
-            return False
-        # Валидация полей
-        template_type: str = self.get_card(card_id)["template_type"]
-        card_data = _validate_template_fields(template_type, kwargs, False)
-        
-        conn = get_db_connection(self.db_path)
-        cursor = conn.cursor()
-        
-        fields = [f"{key} = ?" for key in card_data.keys()]
-        values = list(card_data.values()) + [card_id]
-        
-        query = f"UPDATE cards SET {', '.join(fields)} WHERE card_id = ?"
-        cursor.execute(query, values)
+        # Формируем список полей для INSERT в commits
+        # Берём новые значения из card_data, остальные — None (можно доработать под чтение старых)
+        if card_data:
+            commit_fields = {
+                'commit_id': commit_id,
+                'card_id': card_id,
+                'species': card_data.get('species'),
+                'date': card_data.get('date'),
+                'notes': card_data.get('notes'),
+                'length_body': card_data.get('length_body'),
+                'length_tail': card_data.get('length_tail'),
+                'length_total': card_data.get('length_total'),
+                'weight': card_data.get('weight'),
+                'sex': card_data.get('sex'),
+                'birth_year_exact': card_data.get('birth_year_exact'),
+                'birth_year_approx': card_data.get('birth_year_approx'),
+                'origin_region': card_data.get('origin_region'),
+                'length_device': card_data.get('length_device'),
+                'weight_device': card_data.get('weight_device'),
+                'parent_male_id': card_data.get('parent_male_id'),
+                'parent_female_id': card_data.get('parent_female_id'),
+                'release_date': card_data.get('release_date'),
+                'water_body_name': card_data.get('water_body_name'),
+                'meeting_time': card_data.get('meeting_time'),
+                'status': card_data.get('status'),
+                'water_body_number': card_data.get('water_body_number'),
+                'created_at': datetime.now().isoformat(),
+            }
+
+            # Динамический INSERT
+            cols = list(commit_fields.keys())
+            placeholders = ', '.join(['?' for _ in cols])
+            query = f"INSERT INTO commits ({', '.join(cols)}) VALUES ({placeholders})"
+            cursor.execute(query, [commit_fields[c] for c in cols])
+            logger.info(f"Коммит к особи {card_id} создан")
+
+        # 3. Связываем коммит с добавленными фото (если есть)
+        if added_photo_ids:
+            for photo_id in added_photo_ids:
+                cursor.execute(
+                    "INSERT OR IGNORE INTO commits_photos (commit_id, photo_id) VALUES (?, ?)",
+                    (commit_id, photo_id)
+                )
+
         conn.commit()
         conn.close()
         
@@ -722,6 +712,73 @@ class CardService:
             conn.close()
 
     # -------------------------------------------------------------------------
+    # READ (История)
+    # -------------------------------------------------------------------------
+    def get_commit_history(self, card_id: str, limit: int = None) -> list[dict]:
+        """Возвращает историю изменений особи как список коммитов (снапшотов)."""
+        conn = get_db_connection(self.db_path)
+        cursor = conn.cursor()
+        try:
+            # Коммиты в обратном хронологическом порядке (новые сверху)
+            query = "SELECT * FROM commits WHERE card_id = ? ORDER BY created_at DESC"
+            params = [card_id]
+            
+            if limit:
+                query += " LIMIT ?"
+                params.append(limit)
+                
+            cursor.execute(query, params)
+            columns = [desc[0] for desc in cursor.description]
+            commits = []
+            
+            for row in cursor.fetchall():
+                commit = dict(zip(columns, row))
+                
+                # Добавляем привязанные фото к каждому коммиту
+                cursor.execute(
+                    "SELECT photo_id FROM commits_photos WHERE commit_id = ?",
+                    (commit['commit_id'],)
+                )
+                commit['photo_ids'] = [p[0] for p in cursor.fetchall()]
+                commits.append(commit)
+                
+            return commits
+        finally:
+            conn.close()
+
+
+    def get_field_history(self, card_id: str, field_name: str) -> list[dict]:
+        """Возвращает хронологию изменений конкретного поля."""
+        if field_name not in ALLOWED_COMMIT_FIELDS:
+            raise ValueError(f"Поле '{field_name}' не отслеживается в истории")
+            
+        conn = get_db_connection(self.db_path)
+        cursor = conn.cursor()
+        try:
+            # Запрашиваем только те коммиты, где поле было явно обновлено
+            query = f"""
+                SELECT commit_id, created_at, {field_name} 
+                FROM commits 
+                WHERE card_id = ? AND {field_name} IS NOT NULL 
+                ORDER BY created_at ASC
+            """
+            cursor.execute(query, (card_id,))
+            
+            history = []
+            prev_value = None
+            for commit_id, timestamp, new_value in cursor.fetchall():
+                history.append({
+                    'commit_id': commit_id,
+                    'timestamp': timestamp,
+                    'old_value': prev_value,
+                    'new_value': new_value
+                })
+                prev_value = new_value
+                
+            return history
+        finally:
+            conn.close()
+    # -------------------------------------------------------------------------
     # READ
     # -------------------------------------------------------------------------
     
@@ -732,7 +789,7 @@ class CardService:
         
         cursor.execute('''
             SELECT photo_id, photo_type, photo_number, photo_path, 
-                   date_taken, is_main, is_legacy
+                   date_taken, is_main, is_legacy, embedding_index
             FROM photos
             WHERE card_id = ?
             ORDER BY photo_number ASC, photo_type DESC
@@ -779,78 +836,9 @@ class CardService:
         
         return cards
 
-    def get_matching_card_ids(self, prototype_id: str) -> List[str]:
-        """Внутренний метод: находит все card_id, относящиеся к прототипу."""
-        conn = get_db_connection(self.db_path)
-        cursor = conn.cursor()
-        # Prefix match + exact fallback (работает быстро благодаря PK индексу)
-        cursor.execute('''
-            SELECT card_id FROM cards 
-            WHERE card_id LIKE ? || '-%' OR card_id = ?
-        ''', (prototype_id, prototype_id))
-        
-        ids = [row['card_id'] for row in cursor.fetchall()]
-        conn.close()
-        return ids
-
-    def get_prototype(self, prototype_id: str) -> Optional[Dict[str, Any]]:
+    def search_cards(self, query: str, limit: int = 20) -> List[Dict[str, Any]]:
         """
-        Получает агрегированные данные по прототипу.
-        Возвращает мета-информацию + список всех привязанных карточек.
-        """
-        card_ids = self.get_matching_card_ids(prototype_id)
-        if not card_ids:
-            return None
-
-        cards = list()
-        for card_id in card_ids:
-            cards.append(self.get_card(card_id))
-
-        # Формируем агрегированный ответ
-        # Берем общие поля из первой карточки (ожидается консистентность данных)
-        base = cards[0]
-        return {
-            'prototype_id': prototype_id,
-            'species': base.get('species'),
-            'project_id': base.get('project_id'),
-            'project_name': base.get('project_name'),
-            'total_cards': len(cards),
-            'cards': cards  # Полный список карточек (ИК-1, ИК-2, КВ-1, КВ-2)
-        }
-
-    def get_prototype_photos(self, prototype_id: str) -> List[Dict[str, Any]]:
-        """
-        Получает ВСЕ фотографии всех карточек, относящихся к прототипу.
-        Включает поле template_type для понимания, к какой карточке относится фото.
-        """
-        conn = get_db_connection(self.db_path)
-        cursor = conn.cursor()
-
-        cursor.execute('''
-            SELECT ph.*, ind.template_type
-            FROM photos ph
-            JOIN cards ind ON ph.card_id = ind.card_id
-            WHERE ind.card_id LIKE ? || '-%' OR ind.card_id = ?
-            ORDER BY ind.template_type, ph.photo_type DESC, ph.photo_number ASC
-        ''', (prototype_id, prototype_id))
-        
-        photos = [dict(row) for row in cursor.fetchall()]
-        conn.close()
-        return photos
-
-    def get_prototype_by_card_id(self, card_id: str) -> Optional[Dict[str, Any]]:
-        """Удобный враппер: ищет прототип по ID любой из его карточек."""
-        prototype_id = extract_prototype_id(card_id)
-        return self.get_prototype(prototype_id) if prototype_id else None
-
-    def get_prototype_photos_by_card_id(self, card_id: str) -> List[Dict[str, Any]]:
-        """Удобный враппер для фото по ID карточки."""
-        prototype_id = extract_prototype_id(card_id)
-        return self.get_prototype_photos(prototype_id) if prototype_id else []
-
-    def search_prototypes(self, query: str, limit: int = 20) -> List[Dict[str, Any]]:
-        """
-        Поиск прототипов по частичному совпадению ID или виду.
+        Поиск карточек по частичному совпадению ID или виду.
         Полезно для автодополнения в REST-клиенте.
         """
         conn = get_db_connection(self.db_path)
@@ -869,102 +857,11 @@ class CardService:
         results = [dict(row) for row in cursor.fetchall()]
         conn.close()
         
-        # Группируем по прототипам, убирая дубликаты типов карточек
-        prototype_map = {}
-        for row in results:
-            pid = extract_prototype_id(row['card_id'])
-            if pid not in prototype_map:
-                prototype_map[pid] = {
-                    'prototype_id': pid,
-                    'species': row['species'],
-                    'project_id': row['project_id'],
-                    'matched_cards': []
-                }
-            prototype_map[pid]['matched_cards'].append(row['card_id'])
-            
-        return list(prototype_map.values())
+        return results
 
-    def get_prototypes_by_project(self, project_id: int) -> List[Dict[str, Any]]:
+    def get_all_cards(self) -> List[Dict[str, Any]]:
         """
-        Возвращает список всех прототипов (биологических особей) в рамках проекта.
-        Группирует карточки по prototype_id (NT-К-1).
-        
-        Проверяет целостность архитектуры:
-        Если хотя бы одна карточка прототипа привязана к другому проекту, 
-        выбрасывает исключение DB_INTEGRITY_ERROR.
-        """
-        conn = get_db_connection(self.db_path)
-        cursor = conn.cursor()
-        
-        # 1. Забираем все карточки проекта
-        cursor.execute('''
-            SELECT card_id, template_type, species, created_at, date, sex, notes
-            FROM cards
-            WHERE project_id = ?
-            ORDER BY card_id ASC
-        ''', (project_id,))
-        
-        project_rows = cursor.fetchall()
-        if not project_rows:
-            conn.close()
-            return []
-            
-        # 2. Группируем по prototype_id
-        prototype_map: Dict[str, Dict[str, Any]] = {}
-        for row in project_rows:
-            proto_id = extract_prototype_id(row['card_id'])
-            
-            if proto_id not in prototype_map:
-                prototype_map[proto_id] = {
-                    'prototype_id': proto_id,
-                    'species': row['species'],
-                    'project_id': project_id,
-                    'cards': []
-                }
-                
-            prototype_map[proto_id]['cards'].append({
-                'card_id': row['card_id'],
-                'template_type': row['template_type'],
-                'created_at': row['created_at'],
-                'date': row['date'],
-		'sex': row['sex'],
-		'status': row['notes'],
-            })
-            
-        # 3. ВАЛИДАЦИЯ ЦЕЛОСТНОСТИ
-        # Проверяем, не "размазаны" ли эти особи по другим проектам в БД
-        all_ind_ids = [r['card_id'] for r in project_rows]
-        placeholders = ','.join('?' for _ in all_ind_ids)
-        
-        cursor.execute(f'''
-            SELECT card_id, project_id 
-            FROM cards 
-            WHERE card_id IN ({placeholders}) 
-            AND project_id != ?
-        ''', all_ind_ids + [project_id])
-        
-        cross_project_conflicts = cursor.fetchall()
-        conn.close()
-        
-        if cross_project_conflicts:
-            # Извлекаем уникальные ID прототипов с нарушенной целостностью
-            broken_prototypes = list(set(
-                extract_prototype_id(row['card_id']) 
-                for row in cross_project_conflicts
-            ))
-            raise ValueError(
-                f"DB_INTEGRITY_ERROR: Карточки следующих особей привязаны к разным проектам: {broken_prototypes}. "
-                "По архитектуре проекта все карточки одной особи (NT-К-1) должны находиться строго в одном проекте. "
-                "Проверьте логику импорта или миграции данных."
-            )
-            
-        return list(prototype_map.values())
-
-    def get_all_prototypes(self) -> List[Dict[str, Any]]:
-        """
-        Возвращает список всех прототипов (биологических особей) во всей базе данных.
-        Группирует карточки по prototype_id.
-        Проверяет глобальную целостность архитектуры.
+        Возвращает список всех карточек (биологических особей) во всей базе данных.
         """
         conn = get_db_connection(self.db_path)
         cursor = conn.cursor()
@@ -976,54 +873,9 @@ class CardService:
             ORDER BY card_id ASC
         ''')
         
-        all_rows = cursor.fetchall()
+        all_rows = [dict(row) for row in cursor.fetchall()]
         if not all_rows:
             conn.close()
             return []
-            
-        # 2. Группировка по prototype_id
-        prototype_map: Dict[str, Dict[str, Any]] = {}
-        for row in all_rows:
-            proto_id = extract_prototype_id(row['card_id'])
-            
-            if proto_id not in prototype_map:
-                prototype_map[proto_id] = {
-                    'prototype_id': proto_id,
-                    'species': row['species'],
-                    'projects': set(),
-                    'cards': []
-                }
-                
-            prototype_map[proto_id]['projects'].add(row['project_id'])
-            prototype_map[proto_id]['cards'].append({
-                'card_id': row['card_id'],
-                'template_type': row['template_type'],
-                'created_at': row['created_at'],
-                'date': row['date']
-            })
-            
-        # 3. ВАЛИДАЦИЯ ГЛОБАЛЬНОЙ ЦЕЛОСТНОСТИ
-        # Проверяем, не "размазаны" ли особи по разным проектам
-        broken_prototypes = [
-            pid for pid, data in prototype_map.items() if len(data['projects']) > 1
-        ]
-        
-        if broken_prototypes:
-            conn.close()
-            raise ValueError(
-                f"DB_INTEGRITY_ERROR: Карточки следующих особей привязаны к разным проектам: {broken_prototypes}. "
-                "По архитектуре все карточки одной особи должны находиться строго в одном проекте."
-            )
-            
-        # 4. Формирование чистого результата (убираем служебный set проектов)
-        result = []
-        for proto_id, data in prototype_map.items():
-            result.append({
-                'prototype_id': proto_id,
-                'species': data['species'],
-                'project_id': next(iter(data['projects'])),
-                'cards': data['cards']
-            })
-            
         conn.close()
-        return result
+        return all_rows
