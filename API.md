@@ -249,3 +249,19 @@ result = project_service.delete_project(
 expired_count = service.cleanup_expired_uploads()
 deleted_count = service.cleanup_uploads()
 ```
+
+## Информация
+### Обязательные поля для заполнения карточки по шаблону
+```python
+result = service.get_required_fields()
+```
+
+Возвращает ответ вида:
+```
+{
+    'ИК-1': ['length_body', 'weight', 'sex', ...],
+    'ИК-2': ['parent_male_id', 'parent_female_id', 'water_body_name', 'release_date', ...],
+    'КВ-1': ['status', 'water_body_number', 'length_body', 'length_tail', ...],
+    'КВ-2': ['status', 'water_body_name', ...]
+}
+```
