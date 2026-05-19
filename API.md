@@ -253,7 +253,7 @@ deleted_count = service.cleanup_uploads()
 ## Информация
 ### Обязательные поля для заполнения карточки по шаблону
 ```python
-result = service.get_required_fields()
+result = service.get_required_card_fields()
 ```
 
 Возвращает ответ вида:
