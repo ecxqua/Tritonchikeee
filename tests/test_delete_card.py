@@ -7,6 +7,6 @@ service = create_identification_service()
 
 # 2. Удаление карточки (она же особь)
 print(service.delete_card(
-    card_id="NT-X-2",
+    card_id="NT-K-88",
     confirm=True
 ))

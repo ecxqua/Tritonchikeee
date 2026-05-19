@@ -656,6 +656,8 @@ class CardService:
             if not cursor.fetchone():
                 result['error'] = f"Особь {card_id} не найдена в базе."
                 return result
+
+            cursor.execute('DELETE FROM commits WHERE card_id = ?', (card_id,))
             
             photo_paths = []
             if delete_photos:

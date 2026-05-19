@@ -561,6 +561,7 @@ class IdentificationService:
 
         result['success'] = True
         result['crop_path'] = save_result['crop_path']
+        result['full_path'] = save_result['full_path']
         return result
 
     # ==========================================================================
@@ -604,9 +605,6 @@ class IdentificationService:
             for photo_id in delete_result['photo_ids']:
                 if self.embedding_service.delete(photo_id=photo_id):
                     self.embedding_service.commit()
-                else:
-                    result['error'] = "Ошибка удаления из FAISS. Вектор не найден"
-                    return result
 
             result['success'] = True
             return result
