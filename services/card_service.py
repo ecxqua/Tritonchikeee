@@ -211,7 +211,7 @@ def rename_photo(card_id: str, photo_path: str, suffix: str):
     file_parent = str(Path(photo_path).parent)
     logger.info("Родительская папка сохранённого кропа: " + file_parent)
     photo_path = str(Path(photo_path).rename(
-        f"{file_parent}" / f"{photo_name}{file_suffix}"
+        f"{file_parent}/{photo_name}{file_suffix}"
     ))
     return photo_path
 
@@ -280,6 +280,7 @@ class CardService:
     def _save_new_individual(
         self,
         photo_path_cropped: Optional[str],
+        photo_path_full: Optional[str],
         card_data: Dict[str, Any],
         species: str = "Карелина",
         project_id: Optional[int] = None,
@@ -295,6 +296,7 @@ class CardService:
 
         Args:
             photo_path_cropped (str): путь к кропу брюшка.
+            photo_path_full (str): путь к полному фото.
             species (str): тип тритона для добавления.
             project_id (str): id проекта, куда добавится тритон (не рекомендуется оставлять пустым).
             card_id: номер карточки (рекомендуется оставить пустым!)
@@ -309,9 +311,11 @@ class CardService:
             error: сообщение об ошибке
         """
         result = {
-            "crop_path": photo_path_cropped,
+            "crop_path": None,
+            "full_path": None,
             "card_id": None,
             "photo_id": None,
+            "full_photo_id": None,
             "success": False,
             "error": None
         }
@@ -327,7 +331,10 @@ class CardService:
         if photo_path_cropped:
             photo_path_cropped = rename_photo(card_id, photo_path_cropped, suffix="cropped")
             result['crop_path'] = photo_path_cropped
-        logger.info("Сохранённый кроп: " + photo_path_cropped)
+        if photo_path_full:
+            photo_path_full = rename_photo(card_id, photo_path_full, suffix="full")
+            result['full_path'] = photo_path_full
+        logger.info(f"Сохранённый кроп: {photo_path_cropped}")
         
         if photo_number is None:
             photo_number = _get_next_photo_number(cursor, card_id)
@@ -415,6 +422,24 @@ class CardService:
                 ))
                 # Сохраняем photo_id
                 result['photo_id'] = cursor.lastrowid
+
+            if photo_path_full:
+                cursor.execute('''
+                    INSERT INTO photos (
+                        card_id, photo_type, photo_number, photo_path,
+                        date_taken, time_taken, is_main, is_processed, embedding_index, is_legacy
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ''', (
+                    card_id, 'full', photo_number, photo_path_full,
+                    card_data.get('date', datetime.now().strftime("%d.%m.%Y")),
+                    card_data.get('meeting_time'), 
+                    1,
+                    1,
+                    -1,
+                    1 if is_legacy else 0
+                ))
+                # Сохраняем photo_id
+                result['full_photo_id'] = cursor.lastrowid
             
             conn.commit()
 
@@ -430,7 +455,8 @@ class CardService:
 
     def _add_photo_to_card(
         self,
-        photo_path_cropped: str,
+        photo_path: str,
+        prefix: str,
         card_id: str
     ) -> Dict[str, Any]:
         """
@@ -438,13 +464,15 @@ class CardService:
         
         Returns Dict[str, Any]:
             crop_path: путь к вырезанному брюшку
+            full_path: путь к полному фото
             success: успешность операции
             card_id: id сохранённой карточки
-            photo_id: id добавленного фото в photos
+            photo_id: id добавленного вырезанного бюршка в photos
             error: сообщение об ошибке
         """
         result = {
-            "crop_path": photo_path_cropped,
+            "crop_path": None,
+            "full_path": None,
             "card_id": card_id,
             "photo_id": None,
             "success": False,
@@ -455,7 +483,7 @@ class CardService:
         photo_number = _get_next_photo_number(cursor, card_id)
         card_data = self.get_card(card_id=card_id)
         # Переименование файла
-        photo_path_cropped = rename_photo(card_id, photo_path_cropped, suffix="cropped")
+        photo_path_cropped = rename_photo(card_id, photo_path, suffix=prefix)
         result['crop_path'] = photo_path_cropped
         if not card_data:
             logger.error(f"При добавлении фотографии к карточке не вышло получить card_data")
@@ -468,7 +496,7 @@ class CardService:
                     date_taken, time_taken, is_main, is_processed, embedding_index, is_legacy
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
-                card_id, 'cropped', photo_number, photo_path_cropped,
+                card_id, prefix, photo_number, photo_path_cropped,
                 card_data.get('date', datetime.now().strftime("%d.%m.%Y")),
                 card_data.get('meeting_time'), 
                 1,
@@ -518,9 +546,8 @@ class CardService:
         #     logger.warning("Нет полей для обновления")
         #     return False
         # Валидация полей (если нужна).
-        # card_data = dict()
-        # if template_type:
-        #     card_data = validate_template_fields(template_type, kwargs, False)
+        if template_type and card_data:
+            card_data = validate_template_fields(template_type, card_data, False)
 
         conn = get_db_connection(self.db_path)
         cursor = conn.cursor()
@@ -535,39 +562,40 @@ class CardService:
         
         # Формируем список полей для INSERT в commits
         # Берём новые значения из card_data, остальные — None (можно доработать под чтение старых)
-        if card_data:
-            commit_fields = {
-                'commit_id': commit_id,
-                'card_id': card_id,
-                'species': card_data.get('species'),
-                'date': card_data.get('date'),
-                'notes': card_data.get('notes'),
-                'length_body': card_data.get('length_body'),
-                'length_tail': card_data.get('length_tail'),
-                'length_total': card_data.get('length_total'),
-                'weight': card_data.get('weight'),
-                'sex': card_data.get('sex'),
-                'birth_year_exact': card_data.get('birth_year_exact'),
-                'birth_year_approx': card_data.get('birth_year_approx'),
-                'origin_region': card_data.get('origin_region'),
-                'length_device': card_data.get('length_device'),
-                'weight_device': card_data.get('weight_device'),
-                'parent_male_id': card_data.get('parent_male_id'),
-                'parent_female_id': card_data.get('parent_female_id'),
-                'release_date': card_data.get('release_date'),
-                'water_body_name': card_data.get('water_body_name'),
-                'meeting_time': card_data.get('meeting_time'),
-                'status': card_data.get('status'),
-                'water_body_number': card_data.get('water_body_number'),
-                'created_at': datetime.now().isoformat(),
-            }
+        if not card_data:
+            card_data = dict()
+        commit_fields = {
+            'commit_id': commit_id,
+            'card_id': card_id,
+            'species': card_data.get('species'),
+            'date': card_data.get('date'),
+            'notes': card_data.get('notes'),
+            'length_body': card_data.get('length_body'),
+            'length_tail': card_data.get('length_tail'),
+            'length_total': card_data.get('length_total'),
+            'weight': card_data.get('weight'),
+            'sex': card_data.get('sex'),
+            'birth_year_exact': card_data.get('birth_year_exact'),
+            'birth_year_approx': card_data.get('birth_year_approx'),
+            'origin_region': card_data.get('origin_region'),
+            'length_device': card_data.get('length_device'),
+            'weight_device': card_data.get('weight_device'),
+            'parent_male_id': card_data.get('parent_male_id'),
+            'parent_female_id': card_data.get('parent_female_id'),
+            'release_date': card_data.get('release_date'),
+            'water_body_name': card_data.get('water_body_name'),
+            'meeting_time': card_data.get('meeting_time'),
+            'status': card_data.get('status'),
+            'water_body_number': card_data.get('water_body_number'),
+            'created_at': datetime.now().isoformat(),
+        }
 
-            # Динамический INSERT
-            cols = list(commit_fields.keys())
-            placeholders = ', '.join(['?' for _ in cols])
-            query = f"INSERT INTO commits ({', '.join(cols)}) VALUES ({placeholders})"
-            cursor.execute(query, [commit_fields[c] for c in cols])
-            logger.info(f"Коммит к особи {card_id} создан")
+        # Динамический INSERT
+        cols = list(commit_fields.keys())
+        placeholders = ', '.join(['?' for _ in cols])
+        query = f"INSERT INTO commits ({', '.join(cols)}) VALUES ({placeholders})"
+        cursor.execute(query, [commit_fields[c] for c in cols])
+        logger.info(f"Коммит к особи {card_id} создан")
 
         # 3. Связываем коммит с добавленными фото (если есть)
         if added_photo_ids:

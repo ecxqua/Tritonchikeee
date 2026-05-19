@@ -107,7 +107,8 @@ def init_database():
         CREATE TABLE IF NOT EXISTS uploads (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             project_id INTEGER NOT NULL,
-            file_path TEXT NOT NULL,
+            crop_path TEXT NOT NULL,
+            full_path TEXT,
             embedding TEXT NOT NULL,
             status TEXT DEFAULT 'pending',
             card_id TEXT,

@@ -23,6 +23,7 @@ services/identification_service.py — Оркестратор идентифик
 import logging
 from warnings import deprecated
 from pathlib import Path
+import uuid
 from datetime import datetime
 from typing import Optional, List, Dict, Any
 import numpy as np
@@ -218,20 +219,21 @@ class IdentificationService:
                 
 
             # Обработка
-            process_result = self.get_crop_and_embedding(image_path, debug)
+            process_result = self._get_crop_and_embedding(image_path, debug)
             if process_result['error']:
                 result['error'] = process_result['error']
                 return result
             
             result['embedding'] = process_result['embedding']
             result['crop_path'] = process_result['crop_path']
-            result['full_path'] = process_result['crop_path']
+            result['full_path'] = process_result['full_path']
             
             # === 3. СОЗДАНИЕ ВРЕМЕННОЙ ЗАГРУЗКИ ===
             logger.info(f"Создание загрузки")
             
             upload_id = self.upload_service.create_upload(
-                file_path=process_result['crop_path'],
+                crop_path=process_result['crop_path'],
+                full_path=process_result['full_path'],
                 embedding=process_result['embedding'],
                 expiry_hours=self.config.get('db', {}).get('expiry_hours', 24)
             )
@@ -315,8 +317,8 @@ class IdentificationService:
         try:
             process_result: Dict[str, Any] = {
                 'embedding': upload['embedding'],
-                'crop_path': upload['file_path'],
-                'full_path': None,
+                'crop_path': upload['crop_path'],
+                'full_path': upload['full_path']
             }
             if decision == 'NEW':
                 # === НОВАЯ ОСОБЬ ===
@@ -374,7 +376,7 @@ class IdentificationService:
     # ==========================================================================
     # Вспомогательные функции анализа
     # =========================================================================
-    def get_crop_and_embedding(
+    def _get_crop_and_embedding(
         self,
         image_path: str,
         debug: bool = False
@@ -434,7 +436,7 @@ class IdentificationService:
             
             # Формируем имя файла на основе оригинала
             original_name = Path(image_path).stem
-            crop_filename = f"{original_name}_cropped.jpg"
+            crop_filename = f"{original_name}_{str(uuid.uuid4())}_cropped.jpg"
             crop_save_path = os.path.join(cropped_folder, crop_filename)
             
             cv2.imwrite(crop_save_path, crop_array, [int(cv2.IMWRITE_JPEG_QUALITY), 95])
@@ -448,8 +450,10 @@ class IdentificationService:
         full_folder = self.config.get("full_folder", "data/full")
         os.makedirs(full_folder, exist_ok=True)
 
-        original_filename = Path(image_path).name
-        full_save_path = os.path.join(full_folder, original_filename)
+        original_filename = Path(image_path).stem
+        full_filename = f"{original_filename}_{str(uuid.uuid4())}_full.jpg"
+        
+        full_save_path = os.path.join(full_folder, full_filename)
         shutil.copy2(image_path, full_save_path)
         result['full_path'] = full_save_path
 
@@ -522,7 +526,7 @@ class IdentificationService:
                     "Нет фото или результатов"
                     " для обработки и добавления особи."
                 )
-            process_result = self.get_crop_and_embedding(image_path)
+            process_result = self._get_crop_and_embedding(image_path)
             if process_result['error']:
                 result['error'] = process_result['error']
                 return result
@@ -532,6 +536,7 @@ class IdentificationService:
         # Внутри card_service СОХРАНЯЕТСЯ ФОТОГРАФИЯ НА ДИСКЕ
         save_result = self.card_service._save_new_individual(
             photo_path_cropped=process_result['crop_path'],
+            photo_path_full=process_result['full_path'],
             template_type=template_type,
             species=species,
             project_id=project_id,  # 🔥 FK
@@ -702,7 +707,7 @@ class IdentificationService:
             process_results = list()
             if image_paths:
                 for image_path in image_paths:
-                    process_result = self.get_crop_and_embedding(image_path)
+                    process_result = self._get_crop_and_embedding(image_path)
                     if process_result['error']:
                         result['error'] = process_result['error']
                         return result
@@ -714,6 +719,7 @@ class IdentificationService:
             for process_result in process_results:
                 save_result = self.card_service._add_photo_to_card(
                     process_result['crop_path'],
+                    prefix='cropped',
                     card_id=card_id
                 )
 
@@ -736,6 +742,14 @@ class IdentificationService:
                     result['success'] = True
                     result['crop_path'] = save_result['crop_path']
                     added_photo_ids.append(photo_id)
+
+                    # Добавление полного фото отдельно.
+                    save_full_result = self.card_service._add_photo_to_card(
+                        process_result['full_path'],
+                        prefix='full',
+                        card_id=card_id
+                    )
+                    added_photo_ids.append(save_full_result['photo_id'])
                 else:
                     result['error'] = save_result['error']
                     return result
@@ -775,6 +789,7 @@ class IdentificationService:
     
     def _update_photo_embedding_index(self, photo_path: str, embedding_index: int):
         """Обновить embedding_index для фотографии в БД."""
+        print(f"{embedding_index} {photo_path}")
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
         cursor.execute('''
@@ -825,7 +840,7 @@ class IdentificationService:
             
             # Получаем все фото всех карточки прототипа
             photos = self.card_service.get_card_photos(card_id)
-            print(photos[0]["embedding_index"])
+            # print(photos)
             
             # Фильтр: только кропы с валидным embedding_index
             valid_indices = [
@@ -835,6 +850,7 @@ class IdentificationService:
             
             if not valid_indices:
                 continue
+            print(valid_indices)
                 
             # Загрузка эмбеддингов из FAISS-сервиса
             embeddings_list = []
@@ -842,7 +858,7 @@ class IdentificationService:
                 emb = self.embedding_service.get_embedding_by_index(idx)
                 if emb is not None:
                     embeddings_list.append(emb)
-            print(len(embeddings_list))
+            # print(len(embeddings_list))
 
             if not embeddings_list:
                 continue
