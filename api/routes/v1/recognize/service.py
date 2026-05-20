@@ -27,7 +27,7 @@ def _build_match(
         "photoUrl": "unknown"
     }
 
-    photos = id_service.card_service.get_prototype_photos(id)
+    photos = id_service.card_service.get_card_photos(id)
     if photos:
         path = photos[0]["photo_path"]
         photo_base64 = None
