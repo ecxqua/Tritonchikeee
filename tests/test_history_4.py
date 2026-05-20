@@ -4,5 +4,6 @@ import time
 
 # 1. Инициализация
 service = create_identification_service()
+# service.refresh(confirm=True, remigrate=True)
 
-print(service.card_service.get_card_photos("NT-K-89"))
+print(service.card_service.get_commit_history("NT-K-90"))

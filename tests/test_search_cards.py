@@ -5,4 +5,5 @@ import time
 # 1. Инициализация
 service = create_identification_service()
 
-print(service.card_service.get_card_photos("NT-K-89"))
+results = service.card_service.search_cards(query="NT-K-1")
+print(results)
