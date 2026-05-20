@@ -170,27 +170,6 @@ def get_next_prototype_number(cursor: sqlite3.Cursor, species: str) -> int:
     count = cursor.fetchone()[0]
     return (count or 0) + 1
 
-def generate_card_id(
-    cursor: sqlite3.Cursor, 
-    species: str, 
-) -> str:
-    """Генерирует ID карточки. Ищет СВОБОДНЫЙ ID."""
-    prefix = SPECIES_PREFIX.get(species, 'X')
-    
-    prototype_id = f"NT-{prefix}-{get_next_prototype_number(cursor, species)}"
-    
-    attempts = 0
-    while attempts < 1000:
-        card_id = f"{prototype_id}"
-        cursor.execute('SELECT card_id FROM cards WHERE card_id = ?', (card_id,))
-        if not cursor.fetchone():
-            return card_id
-        attempts += 1
-        current_num = int(prototype_id.split('-')[2])
-        prototype_id = f"NT-{prefix}-{current_num + 1}"
-    
-    raise ValueError(f"Не удалось сгенерировать уникальный ID после {attempts} попыток")
-
 def _get_next_photo_number(cursor: sqlite3.Cursor, card_id: str) -> str:
     """Автоматически генерирует порядковый номер фото (01, 02, 03...)."""
     cursor.execute("SELECT COUNT(*) FROM photos WHERE card_id = ?", (card_id,))
@@ -215,27 +194,30 @@ def rename_photo(card_id: str, photo_path: str, suffix: str):
     ))
     return photo_path
 
-def extract_prototype_id(card_id: str) -> str:
-    """
-    Извлекает ID прототипа из card_id.
-    Формат: NT-К-1-ИК1 -> NT-К-1
-    Использует последнее вхождение '-' как разделитель типа карточки.
-    """
-    if not card_id:
-        return ""
-    parts = card_id.rsplit('-', 1)
-    return parts[0] if len(parts) > 1 else card_id
-
-def form_card_id(prototype_id: str, template_type: str):
-    """
-    (LEGACY)
-    Формируем пару id+template_type
-
-    Args:
-        prototype_id (str): номер id особи (NT-K-13)
-        template_type (str): шаблон карточки (КВ-1/ИК-1)
-    """
-    return prototype_id
+def form_card_id(cursor, species_name: str):
+    """Генерирует id карточки инкрементально, использует таблицу species."""
+    species_prefix = SPECIES_PREFIX.get(species_name, "X")
+    cursor.execute(
+        "SELECT count, last_num FROM species WHERE prefix = ?",
+        (species_prefix)
+    )
+    species_data = cursor.fetchone()
+    if species_data:
+        count = species_data[0] + 1
+        animal_num = species_data[1] + 1
+        cursor.execute('''
+            UPDATE species
+            SET count = ?, last_num = ?
+            WHERE prefix = ?
+        ''', (count, animal_num, species_prefix))
+        return f"NT-{species_prefix}-{animal_num}"
+    else:
+        cursor.execute('''
+            INSERT OR IGNORE INTO species
+            (prefix, name, count, last_num)
+            VALUES (?, ?, ?, ?)
+        ''', (species_prefix, species_name, 1, 1))
+        return f"NT-{species_prefix}-1"
 
 # =============================================================================
 # CARD SERVICE — Основная бизнес-логика
@@ -282,7 +264,7 @@ class CardService:
         photo_path_cropped: Optional[str],
         photo_path_full: Optional[str],
         card_data: Dict[str, Any],
-        species: str = "Карелина",
+        species: str = "Неизвестный",
         project_id: Optional[int] = None,
         template_type: str = "ИК-1",
         photo_number: Optional[str] = None,
@@ -325,7 +307,7 @@ class CardService:
         cursor = conn.cursor()
         
         # Генерируем card_id с учётом template_type
-        card_id = generate_card_id(cursor, species)
+        card_id = form_card_id(cursor, species)
         result['card_id'] = card_id
         # Сохраняем фотографию.
         if photo_path_cropped:
@@ -433,7 +415,7 @@ class CardService:
                     card_id, 'full', photo_number, photo_path_full,
                     card_data.get('date', datetime.now().strftime("%d.%m.%Y")),
                     card_data.get('meeting_time'), 
-                    1,
+                    -1,
                     1,
                     -1,
                     1 if is_legacy else 0
@@ -483,8 +465,8 @@ class CardService:
         photo_number = _get_next_photo_number(cursor, card_id)
         card_data = self.get_card(card_id=card_id)
         # Переименование файла
-        photo_path_cropped = rename_photo(card_id, photo_path, suffix=prefix)
-        result['crop_path'] = photo_path_cropped
+        photo_path = rename_photo(card_id, photo_path, suffix=prefix)
+        result['crop_path'] = photo_path
         if not card_data:
             logger.error(f"При добавлении фотографии к карточке не вышло получить card_data")
             result["error"] = "При добавлении фотографии к карточке не вышло получить card_data"
@@ -496,10 +478,10 @@ class CardService:
                     date_taken, time_taken, is_main, is_processed, embedding_index, is_legacy
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
-                card_id, prefix, photo_number, photo_path_cropped,
+                card_id, prefix, photo_number, photo_path,
                 card_data.get('date', datetime.now().strftime("%d.%m.%Y")),
                 card_data.get('meeting_time'), 
-                1,
+                -1,
                 1,
                 -1,
                 0
@@ -507,7 +489,7 @@ class CardService:
             # Сохраняем photo_id
             result['photo_id'] = cursor.lastrowid
             conn.commit()
-            logger.info(f"Фото к карточке добавлено: {photo_path_cropped} ({card_id})")
+            logger.info(f"Фото к карточке добавлено: {photo_path} ({card_id})")
         except Exception as e:
             conn.rollback()
             logger.error(f"Ошибка добавления фотографии к карточке: {e}")
@@ -647,7 +629,14 @@ class CardService:
                 f"Передайте confirm=True для подтверждения."
             )
             return result
-        
+
+        # Извлекаем данные о виде тритона для редактирования статистики после DELETE.
+        card_data = self.get_card(card_id)
+        if not card_data:
+            result['error'] = f"Особь {card_id} не найдена в базе."
+            return result
+        species_prefix = SPECIES_PREFIX[card_data["species"]]
+
         conn = get_db_connection(self.db_path)
         cursor = conn.cursor()
         
@@ -657,8 +646,10 @@ class CardService:
                 result['error'] = f"Особь {card_id} не найдена в базе."
                 return result
 
+            # Удаление истории карточки.
             cursor.execute('DELETE FROM commits WHERE card_id = ?', (card_id,))
-            
+
+            # Удаление фотографий карточки.
             photo_paths = []
             if delete_photos:
                 # 1. Получаем photo_id ДО удаления (важно сохранить перед очисткой)
@@ -668,11 +659,10 @@ class CardService:
                 cursor.execute('SELECT photo_path FROM photos WHERE card_id = ?', (card_id,))
                 photo_paths = [row['photo_path'] for row in cursor.fetchall()]
                 cursor.execute('DELETE FROM photos WHERE card_id = ?', (card_id,))
-            
+            # Удаление карточки
             cursor.execute('DELETE FROM cards WHERE card_id = ?', (card_id,))
-            
-            conn.commit()
-            
+
+            # Удаление файлов фотографий.
             if delete_photos:
                 for photo_path in photo_paths:
                     try:
@@ -681,7 +671,21 @@ class CardService:
                     except FileNotFoundError:
                         # Не смогли удалить файл, но всё равно выполняем операции
                         result['error'] = result['error'] + f"Файл {photo_path} не был найден\n"
-            
+
+            # Обновляем статистику по особям.
+            cursor.execute(
+                "SELECT count, last_num FROM species WHERE prefix = ?",
+                (species_prefix)
+            )
+            species_data = cursor.fetchone()
+            count = species_data[0] - 1
+            cursor.execute('''
+                UPDATE species
+                SET count = ?
+                WHERE prefix = ?
+            ''', (count, species_prefix))
+            conn.commit()
+
             logger.info(f"Карточка {card_id} удалена")
             result['success'] = True
             return result
@@ -848,7 +852,6 @@ class CardService:
         
         row = cursor.fetchone()
         row = dict(row)
-        row['prototype_id'] = extract_prototype_id(card_id)
         conn.close()
         
         return filter_card_by_template(dict(row) if row else None)

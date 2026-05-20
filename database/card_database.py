@@ -153,7 +153,7 @@ def init_database():
     ''')
 
     # -------------------------------------------------------------------------
-    # ТАБЛИЦА 6: commits-photos (many-to-many) связь для коммитов и добавленных фото.
+    # ТАБЛИЦА 6: commits_photos (many-to-many) связь для коммитов и добавленных фото.
     # -------------------------------------------------------------------------
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS commits_photos (
@@ -161,6 +161,18 @@ def init_database():
             photo_id INTEGER,
             FOREIGN KEY(commit_id) REFERENCES commits(commit_id),
             FOREIGN KEY(photo_id) REFERENCES photos(photo_id)
+        )
+    ''')
+
+    # -------------------------------------------------------------------------
+    # ТАБЛИЦА 7: species
+    # -------------------------------------------------------------------------
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS species (
+            prefix TEXT PRIMARY KEY,
+            name TEXT,
+            count INTEGER,
+            last_num INTEGER
         )
     ''')
     
