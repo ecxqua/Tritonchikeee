@@ -21,24 +21,20 @@ export function NewtDetail() {
   const params = useParams();
   const newtId = params.newtId || "";
   const { toast } = useToast();
-
   const [newt, setNewt] = useState<Newt | null>(null);
   const [cards, setCards] = useState<NewtCard[]>([]);
   const [history, setHistory] = useState<HistoryRecord[]>([]);
-
+  const [cardHistories, setCardHistories] = useState<Record<string, Record<string, any[]>>>({});
   const [newtLoading, setNewtLoading] = useState(true);
   const [cardLoading, setCardLoading] = useState(true);
   const [historyLoading, setHistoryLoading] = useState(true);
-
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
-
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const [editData, setEditData] = useState<Record<number, Record<string, any>>>({});
 
   useEffect(() => {
     if (!newtId) return;
-
     setNewtLoading(true);
     setCardLoading(true);
     setHistoryLoading(true);
@@ -48,9 +44,25 @@ export function NewtDetail() {
       setNewtLoading(false);
     });
 
-    getNewtCards(newtId).then((res) => {
+    getNewtCards(newtId).then(async (res) => {
       setCards(res);
       setCardLoading(false);
+      
+      // Изменения с историей
+      try {
+        const config = await window.api.getConfig();
+        const historyMap: Record<string, Record<string, any[]>> = {};
+        await Promise.all(res.map(async (card) => {
+          const cardId = (card as any).id || card.cardType;
+          const response = await fetch(`${config.apiBaseUrl}/cards/${cardId}/history`);
+          if (response.ok) {
+            historyMap[cardId] = await response.json();
+          }
+        }));
+        setCardHistories(historyMap);
+      } catch (err) {
+        console.error("Failed to load card histories:", err);
+      }
     });
 
     getNewtHistory(newtId).then((res) => {
@@ -62,7 +74,6 @@ export function NewtDetail() {
   const toInputDate = (dateStr: string | undefined): string => {
     if (!dateStr) return "";
     if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return dateStr;
-    
     const parts = dateStr.split(".");
     if (parts.length === 3) {
       return `${parts[2]}-${parts[1]}-${parts[0]}`;
@@ -72,8 +83,7 @@ export function NewtDetail() {
 
   const toDisplayDate = (dateStr: string | undefined): string => {
     if (!dateStr) return "";
-    if (/^\d{2}\.\d{2}\.\d{4}$/.test(dateStr)) return dateStr;
-    
+    if (/^\d{2}.\d{2}.\d{4}$/.test(dateStr)) return dateStr;
     const parts = dateStr.split("-");
     if (parts.length === 3) {
       return `${parts[2]}.${parts[1]}.${parts[0]}`;
@@ -82,25 +92,22 @@ export function NewtDetail() {
   };
 
   const handleEditStart = (index: number) => {
-  const card = cards[index];
-  const rawData = card?.data || {};
-
-  const initializedData = {
-    species: rawData.species || card?.species || "тритон карелина",
-    ...rawData,
+    const card = cards[index];
+    const rawData = card?.data || {};
+    const initializedData = {
+      species: rawData.species || card?.species || "тритон карелина",
+      ...rawData,
+    };
+    setEditData(prev => ({
+      ...prev,
+      [index]: initializedData,
+    }));
+    setEditingIndex(index);
   };
-
-  setEditData(prev => ({
-    ...prev,
-    [index]: initializedData,
-  }));
-  setEditingIndex(index);
-};
 
   const handleSave = async (index: number) => {
     const card = cards[index];
     if (!card) return;
-
     setSaving(true);
 
     try {
@@ -128,81 +135,78 @@ export function NewtDetail() {
   };
 
   const renderField = (
-  index: number,
-  key: string,
-  label: string,
-  value: any,
-  type = "text",
-  isParentId = false,
-  options?: string[]
-) => {
-  const isEditing = editingIndex === index;
-
-  if (!isEditing) {
-    const displayValue = value || "—";
-    const canLinkParent = isParentId && typeof value === "string" && value.trim() !== "" && value !== "данные отсутствуют";
-
-    return (
-      <div className="py-3 border-b last:border-0 border-border/50">
-        <dt className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-1">{label}</dt>
-        <dd className="text-sm font-medium">
-          {canLinkParent ? (
-            <Link href={`/newts/${value}`} onClick={() => clearNewtReturnHint()}>
-              <span className="text-primary underline cursor-pointer">{displayValue}</span>
-            </Link>
-          ) : (
-            displayValue
-          )}
-        </dd>
-      </div>
-    );
-  }
-
-  if (options && options.length > 0) {
-    const storedVal = editData[index]?.[key];
-    const currentValue = storedVal || value || options[0];
-
+    index: number,
+    key: string,
+    label: string,
+    value: any,
+    type = "text",
+    isParentId = false,
+    options?: string[]
+  ) => {
+    const isEditing = editingIndex === index;
+    if (!isEditing) {
+      const displayValue = value || "—";
+      const canLinkParent = isParentId && typeof value === "string" && value.trim() !== "" && value !== "данные отсутствуют";
+      return (
+        <div className="py-3 border-b last:border-0 border-border/50">
+          <dt className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-1">{label}</dt>
+          <dd className="text-sm font-medium">
+            {canLinkParent ? (
+              <Link href={`/newts/${value}`} onClick={() => clearNewtReturnHint()}>
+                <span className="text-primary underline cursor-pointer">{displayValue}</span>
+              </Link>
+            ) : (
+              displayValue
+            )}
+          </dd>
+        </div>
+      );
+    }
+    if (options && options.length > 0) {
+      const storedVal = editData[index]?.[key];
+      const currentValue = storedVal || value || options[0];
+      return (
+        <div className="py-3 border-b last:border-0 border-border/50 space-y-2">
+          <Label className="text-xs uppercase tracking-wider text-muted-foreground">{label}</Label>
+          <Select
+            value={currentValue}
+            onValueChange={(val) => setEditData(prev => ({
+              ...prev,
+              [index]: { ...prev[index], [key]: val }
+            }))}
+          >
+            <SelectTrigger className="h-8"> <SelectValue /> </SelectTrigger>
+            <SelectContent>
+              {options.map(opt => <SelectItem key={opt} value={opt}>{opt}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </div>
+      );
+    }
     return (
       <div className="py-3 border-b last:border-0 border-border/50 space-y-2">
         <Label className="text-xs uppercase tracking-wider text-muted-foreground">{label}</Label>
-        <Select 
-          value={currentValue} 
-          onValueChange={(val) => setEditData(prev => ({
-            ...prev,
-            [index]: { ...prev[index], [key]: val }
-          }))}
-        >
-          <SelectTrigger className="h-8"><SelectValue /></SelectTrigger>
-          <SelectContent>
-            {options.map(opt => <SelectItem key={opt} value={opt}>{opt}</SelectItem>)}
-          </SelectContent>
-        </Select>
+        <Input
+          type={type}
+          value={type === "date" ? toInputDate(editData[index]?.[key] as string) : (editData[index]?.[key] || "")}
+          onChange={(e) => {
+            const newValue = type === "date" ? toDisplayDate(e.target.value) : e.target.value;
+            setEditData(prev => ({
+              ...prev,
+              [index]: { ...prev[index], [key]: newValue }
+            }));
+          }}
+          className="h-8"
+        />
       </div>
     );
-  }
-
-  return (
-    <div className="py-3 border-b last:border-0 border-border/50 space-y-2">
-      <Label className="text-xs uppercase tracking-wider text-muted-foreground">{label}</Label>
-      <Input
-        type={type}
-        value={type === "date" ? toInputDate(editData[index]?.[key] as string) : (editData[index]?.[key] || " ")}
-        onChange={(e) => {
-          const newValue = type === "date" ? toDisplayDate(e.target.value) : e.target.value;
-          setEditData(prev => ({
-            ...prev,
-            [index]: { ...prev[index], [key]: newValue }
-          }));
-        }}
-        className="h-8"
-      />
-    </div>
-  );
-};
+  };
 
   const renderCard = (card: NewtCard, index: number) => {
     const cardData = card.data || {};
     const data = editingIndex === index ? editData[index] : cardData;
+    const cardId = (card as any).id || card.cardType;
+    const cardHistory = cardHistories[cardId] || {};
 
     const renderFieldsForCardType = () => {
       if (card.cardType === "ИК-1") {
@@ -331,7 +335,7 @@ export function NewtDetail() {
                   toast({ title: "Карточка удалена" });
                 } catch {
                   toast({
-                    title: "Не удалось удалить карточку.",
+                    title: "Не удалось удалить карточку. ",
                     variant: "destructive",
                   });
                 } finally {
@@ -354,9 +358,27 @@ export function NewtDetail() {
               editable={editingIndex === index}
             />
           </div>
+
+          {/* Integrated Card History Section */}
+          {Object.keys(cardHistory).length > 0 && (
+            <div className="pt-4 border-t mt-4">
+              <h4 className="text-sm font-medium mb-2 text-muted-foreground">История изменений по полям</h4>
+              <div className="space-y-2 max-h-48 overflow-y-auto pr-2">
+                {Object.entries(cardHistory).map(([field, records]) => (
+                  <div key={field} className="space-y-1">
+                    <div className="text-xs font-semibold text-primary uppercase tracking-wide">{field}</div>
+                    {(records as any[]).map((rec: any, idx: number) => (
+                      <div key={idx} className="text-xs text-muted-foreground pl-3 border-l-2 border-border/50">
+                        {rec.oldValue !== undefined ? `${rec.oldValue} → ${rec.newValue}` : String(rec)}
+                      </div>
+                    ))}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </CardContent>
       </Card>
-      
     );
   };
 
@@ -369,7 +391,6 @@ export function NewtDetail() {
       </div>
     );
   }
-
   if (!newt) {
     return <div className="p-8 text-center text-muted-foreground">Особь не найдена</div>;
   }
@@ -379,7 +400,6 @@ export function NewtDetail() {
 
   return (
     <div className="p-8 max-w-5xl mx-auto space-y-8 animate-in fade-in duration-500">
-
       <Link href={backHref} onClick={() => clearNewtReturnHint()}>
         <Button variant="ghost" size="sm">
           <ArrowLeft className="w-4 h-4 mr-2" /> Назад
@@ -414,7 +434,7 @@ export function NewtDetail() {
               window.history.back();
             } catch {
               toast({
-                title: "Не удалось удалить особь. Возможно, endpoint не реализован на backend.",
+                title: "Не удалось удалить особь. Возможно, endpoint не реализован на backend. ",
                 variant: "destructive",
               });
             } finally {
@@ -436,7 +456,7 @@ export function NewtDetail() {
 
       <Card>
         <CardHeader>
-          <CardTitle>История</CardTitle>
+          <CardTitle>История особи</CardTitle>
         </CardHeader>
         <CardContent>
           {historyLoading ? (
@@ -454,7 +474,6 @@ export function NewtDetail() {
           )}
         </CardContent>
       </Card>
-
     </div>
   );
 }
