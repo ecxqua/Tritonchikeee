@@ -770,6 +770,10 @@ class IdentificationService:
         """Возвращает словарь обязательных полей для каждого шаблона карты."""
         return REQUIRED_FIELDS
 
+    def get_species(self):
+        """Возвращает актуальную статистику по всем видам особей."""
+        return self.card_service.get_species()
+
     def cleanup_expired_uploads(self) -> int:
         """Очищает просроченные загрузки."""
         return self.upload_service.cleanup(True)
@@ -787,7 +791,6 @@ class IdentificationService:
     
     def _update_photo_embedding_index(self, photo_path: str, embedding_index: int):
         """Обновить embedding_index для фотографии в БД."""
-        print(f"{embedding_index} {photo_path}")
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
         cursor.execute('''
@@ -833,12 +836,10 @@ class IdentificationService:
         metadata = {}
 
         for proto in all_prototypes:
-            print(proto)
             card_id = proto['card_id']
             
             # Получаем все фото всех карточки прототипа
             photos = self.card_service.get_card_photos(card_id)
-            # print(photos)
             
             # Фильтр: только кропы с валидным embedding_index
             valid_indices = [
@@ -848,7 +849,6 @@ class IdentificationService:
             
             if not valid_indices:
                 continue
-            print(valid_indices)
                 
             # Загрузка эмбеддингов из FAISS-сервиса
             embeddings_list = []
@@ -856,7 +856,6 @@ class IdentificationService:
                 emb = self.embedding_service.get_embedding_by_index(idx)
                 if emb is not None:
                     embeddings_list.append(emb)
-            # print(len(embeddings_list))
 
             if not embeddings_list:
                 continue

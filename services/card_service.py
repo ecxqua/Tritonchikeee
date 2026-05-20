@@ -817,7 +817,7 @@ class CardService:
         finally:
             conn.close()
     # -------------------------------------------------------------------------
-    # READ
+    # READ (Карточки)
     # -------------------------------------------------------------------------
     
     def get_card_photos(self, card_id: str) -> List[Dict[str, Any]]:
@@ -916,3 +916,24 @@ class CardService:
             return []
         conn.close()
         return all_rows
+
+    # -------------------------------------------------------------------------
+    # READ (Статистика и контсанты)
+    # -------------------------------------------------------------------------
+    def get_species(self):
+        """Возвращает актуальную статистику по всем видам особей."""
+        conn = get_db_connection(self.db_path)
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT prefix, name, count FROM species"
+        )
+        all_rows = [dict(row) for row in cursor.fetchall()]
+        if not all_rows:
+            conn.close()
+            return []
+        conn.close
+        return all_rows
+
+    def get_required_card_fields(self):
+        """Возвращает словарь обязательных полей для каждого шаблона карты."""
+        return REQUIRED_FIELDS
