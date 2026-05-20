@@ -18,9 +18,7 @@ from warnings import deprecated
 from pathlib import Path
 from datetime import datetime
 import sqlite3
-import json
 import numpy as np
-import re  # Для извлечения id особи из id карточки
 import uuid
 from typing import Optional, Dict, List, Any
 
@@ -56,23 +54,23 @@ ALLOWED_FIELDS = {
         'date', 'length_body', 'weight', 'sex', 'length_tail',
         'birth_year_exact', 'birth_year_approx', 
         'origin_region', 'length_device', 'weight_device', 'notes',
-	'species',
+        'species',
     ],
     'ИК-2': [
         'date', 'release_date', 'parent_male_id', 'parent_female_id',
         'length_total', 'weight', 'water_body_name', 'notes',
-	'species',
+        'species',
     ],
     'КВ-1': [
         'date', 'meeting_time', 'length_body', 'length_tail',
         'weight', 'sex', 'status', 'water_body_number',
         'length_device', 'weight_device', 'notes',
-	'species',
+        'species',
     ],
     'КВ-2': [
         'date', 'meeting_time', 'length_total',
         'status', 'water_body_name', 'notes',
-	'species',
+        'species',
     ]
 }
 
