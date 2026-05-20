@@ -11,14 +11,12 @@ from services.identification_service import IdentificationService
 router = APIRouter()
 @router.get("/cards/{card_id}/history")
 async def get_card_history(
-    newt_id: str,
     card_id: str,
     id_service: IdentificationService = Depends(get_id_service)
 ):
     try:
         return await run_in_threadpool(
             service.get_card_history,
-            newt_id,
             card_id,
             id_service
         )
