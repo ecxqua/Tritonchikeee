@@ -860,7 +860,7 @@ class CardService:
         cursor = conn.cursor()
         
         cursor.execute('''
-            SELECT card_id, template_type, species, created_at, date
+            SELECT card_id, template_type, species, created_at, date, sex, status
             FROM cards
             WHERE project_id = ?
             ORDER BY created_at DESC
