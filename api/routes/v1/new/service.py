@@ -90,7 +90,7 @@ def add_new_card(
                     data=photo.data
                 )
 
-                id_service.add_photo_to_card(card, str(photo_path))
+                id_service.commit_card(card, image_paths=[str(photo_path)])
 
         return {"id": card}
     except Exception as ex:
