@@ -4,6 +4,7 @@ import time
 
 # 1. Инициализация
 
+setup()
 service = create_identification_service()
 # service.refresh(confirm=True, remigrate=True)
 print("Старт обработки")

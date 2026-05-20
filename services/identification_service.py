@@ -926,15 +926,30 @@ class IdentificationService:
 def setup(migrate: bool = True):
     """
     Скачать модели и поднять базы данных.
+    Если подняты, то не поднимает повторно!
 
     Args:
         migrate (bool): произвести миграцию датасета по умолчанию.
     """
+    config = load_config()
+    DB_PATH = config.get('db', {}).get('db_path', 'database/cards.db')
+    INDEX_PATH = config.get('db', {}).get(
+        'faiss_index_path', 'data/embeddings/database_embeddings.pkl'
+    )
+    db_exists = os.path.exists(DB_PATH)
+    index_exists = os.path.exists(INDEX_PATH)
+
     download_models_folder()
-    init_database()
-    if migrate:
-        migrate_dataset()
-    build_faiss_index()
+    if not db_exists and not index_exists:
+        init_database()
+        if migrate:
+            migrate_dataset()
+        build_faiss_index()
+    elif db_exists and not index_exists:
+        build_faiss_index()
+        print("✅ Инициализация завершена.")
+    else:
+        print(f"⏭️ {DB_PATH} и {INDEX_PATH} уже существуют. Повторная инициализация пропущена.")
 
 def create_identification_service() -> IdentificationService:
     """
