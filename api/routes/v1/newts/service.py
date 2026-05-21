@@ -170,20 +170,3 @@ def delete_card(
         raise APIError(status=400, msg=result['error'])
 
     return {}
-
-
-def delete_newt(
-    newt_id: str,
-    id_service: IdentificationService,
-) -> Dict[str, Any]:
-    card_ids = id_service.card_service.get(newt_id)
-    if not card_ids:
-        raise APIError(status=404, msg=f"Newt {newt_id} not found")
-    
-    for id in card_ids:
-        result = id_service.card_service._delete_card(id, True, True)
-        if result['error'] is not None:
-            raise APIError(status=400, msg=result['error'])
-
-    return {}
-
