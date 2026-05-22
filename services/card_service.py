@@ -590,6 +590,31 @@ class CardService:
         
         logger.info(f"Особь {card_id} обновлена")
         return True
+
+    def _add_reid_count(self):
+        conn = get_db_connection(self.db_path)
+        cursor = conn.cursor()
+        field = "reid_count"
+        # Обновляем статистику по особям.
+        cursor.execute(
+            "SELECT value FROM stats WHERE name = ?",
+            (field,)
+        )
+        stats = cursor.fetchone()
+        if stats:
+            count = stats[0] + 1
+            cursor.execute('''
+                UPDATE stats
+                SET value = ?
+                WHERE name = ?
+            ''', (count, field))
+        else:
+            cursor.execute('''
+                INSERT OR IGNORE INTO stats
+                (name, value)
+                VALUES (?, ?)
+            ''', (field, 1))
+        conn.commit()
     
     # -------------------------------------------------------------------------
     # DELETE
@@ -747,6 +772,30 @@ class CardService:
         finally:
             conn.close()
 
+    def _refresh_reid_count(self):
+        conn = get_db_connection(self.db_path)
+        cursor = conn.cursor()
+        field = "reid_count"
+        # Обновляем статистику по особям.
+        cursor.execute(
+            "SELECT value FROM stats WHERE name = ?",
+            (field,)
+        )
+        stats = cursor.fetchone()
+        if stats:
+            cursor.execute('''
+                UPDATE stats
+                SET value = ?
+                WHERE name = ?
+            ''', (0, field))
+        else:
+            cursor.execute('''
+                INSERT OR IGNORE INTO stats
+                (name, value)
+                VALUES (?, ?)
+            ''', (field, 0))
+        conn.commit()
+
     # -------------------------------------------------------------------------
     # READ (История)
     # -------------------------------------------------------------------------
@@ -758,6 +807,38 @@ class CardService:
             # Коммиты в обратном хронологическом порядке (новые сверху)
             query = "SELECT * FROM commits WHERE card_id = ? ORDER BY created_at DESC"
             params = [card_id]
+            
+            if limit:
+                query += " LIMIT ?"
+                params.append(limit)
+                
+            cursor.execute(query, params)
+            columns = [desc[0] for desc in cursor.description]
+            commits = []
+            
+            for row in cursor.fetchall():
+                commit = dict(zip(columns, row))
+                
+                # Добавляем привязанные фото к каждому коммиту
+                cursor.execute(
+                    "SELECT photo_id FROM commits_photos WHERE commit_id = ?",
+                    (commit['commit_id'],)
+                )
+                commit['photo_ids'] = [p[0] for p in cursor.fetchall()]
+                commits.append(commit)
+                
+            return commits
+        finally:
+            conn.close()
+
+    def get_last_commits(self, limit: int = 5) -> list[dict]:
+        """Возвращает последние n коммитов в истории приложения."""
+        conn = get_db_connection(self.db_path)
+        cursor = conn.cursor()
+        try:
+            # Коммиты в обратном хронологическом порядке (новые сверху)
+            query = "SELECT * FROM commits ORDER BY created_at DESC"
+            params = []
             
             if limit:
                 query += " LIMIT ?"
@@ -814,6 +895,18 @@ class CardService:
             return history
         finally:
             conn.close()
+
+    def get_reid_count(self) -> int:
+        """Возвращает количество проведённых распознаваний в базе."""
+        conn = get_db_connection(self.db_path)
+        cursor = conn.cursor()
+        # Обновляем статистику по особям.
+        cursor.execute(
+            "SELECT value FROM stats WHERE name = ?",
+            ("reid_count",)
+        )
+        stats = cursor.fetchone()
+        return stats[0]
     # -------------------------------------------------------------------------
     # READ (Карточки)
     # -------------------------------------------------------------------------

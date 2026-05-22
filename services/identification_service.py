@@ -253,6 +253,9 @@ class IdentificationService:
             else:
                 logger.info("В базе нет особей для поиска (новая база или пустой проект)")
                 result['candidates'] = []
+
+            # Статистика распознаваний в бд.
+            self.card_service._add_reid_count()
             
             result['success'] = True
             logger.info(f"Анализ завершён: upload_id={upload_id}, кандидатов={len(candidates)}")
@@ -773,6 +776,10 @@ class IdentificationService:
     def get_species(self):
         """Возвращает актуальную статистику по всем видам особей."""
         return self.card_service.get_species()
+
+    def refresh_reid_count(self):
+        """Обнуляет счётчик количества распознаваний."""
+        self.card_service._refresh_reid_count()
 
     def cleanup_expired_uploads(self) -> int:
         """Очищает просроченные загрузки."""
