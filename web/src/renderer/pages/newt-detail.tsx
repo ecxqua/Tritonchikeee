@@ -413,37 +413,6 @@ export function NewtDetail() {
             {cards.map(c => c.cardType).join(", ")}
           </div>
         </div>
-        <Button
-          variant="destructive"
-          disabled={deleting || saving}
-          onClick={async () => {
-            if (!window.confirm(`Вы точно хотите удалить особь ${newt.id}? Это действие необратимо.`)) return;
-
-            setDeleting(true);
-            try {
-              const config = await window.api.getConfig();
-              const res = await fetch(`${config.apiBaseUrl}/newts/${newtId}`, {
-                method: "DELETE",
-              });
-
-              if (!res.ok) {
-                throw new Error(`Delete newt failed: ${res.status}`);
-              }
-
-              toast({ title: "Особь удалена" });
-              window.history.back();
-            } catch {
-              toast({
-                title: "Не удалось удалить особь. Возможно, endpoint не реализован на backend. ",
-                variant: "destructive",
-              });
-            } finally {
-              setDeleting(false);
-            }
-          }}
-        >
-          <Trash2 className="w-4 h-4 mr-2" /> Удалить особь
-        </Button>
       </div>
 
       <div className="space-y-6">
