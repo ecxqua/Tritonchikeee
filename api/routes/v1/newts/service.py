@@ -104,27 +104,26 @@ def patch_card_by_newt_id(
     params: Dict[str, Any],
     id_service: IdentificationService,
 ) -> Dict[str, Any]:
-    proto = id_service.card_service.get_prototype_by_card_id(id)
-    if not proto:
-        raise APIError(status=404, msg=f"No prototype by ID {id}")
+    card = id_service.card_service.get_card(id)
+    if not card:
+        raise APIError(status=404, msg=f"No card by ID {id}")
 
-    card = sorted(proto["cards"], key=lambda c: c["created_at"])[0]
     template_type = params["cardType"]
     submission_id = f"{id}-{template_type.replace('-', '')}"
 
     filtered_params = {
-	key: value
-	for key, value in params.items()
-	if key not in card or card[key] != value or not value
+	    key: value
+	    for key, value in params.items()
+	    if key not in card or card[key] != value or not value
     }
 
     for key in [  # cleanup & extract later
-	"cardType", "photoNumber"
+	    "cardType", "photoNumber"
     ]:
         filtered_params.pop(key)
 
     new_params = {
-	k: v for k, v in {
+	    k: v for k, v in {
             "date": filtered_params.get("dateFilled", None),
             "length_body": filtered_params.get("bodyLength", None),
             "length_tail": filtered_params.get("tailLength", None),
@@ -148,12 +147,12 @@ def patch_card_by_newt_id(
             "status": filtered_params.get("status", None),
             "water_body_number": filtered_params.get("waterBodyNumber", None),
 	    "species": filtered_params.get("species", None),
-	}.items() if v
+	    }.items() if v
     }
 
     print(f"{new_params=} END3")
 
-    if not id_service.card_service._update_card(submission_id, **new_params):
+    if not id_service.commit_card(submission_id, **new_params):
         raise APIError(status=500, msg="Something went wrong")
 
     return {}
@@ -165,26 +164,9 @@ def delete_card(
     id_service: IdentificationService,
 ) -> Dict[str, Any]:
     card_id = f"{newt_id}-{card_type.replace('-', '')}"
-    result = id_service.card_service._delete_card(card_id, True, True)
+    result = id_service.delete_card(card_id, True, True)
 
     if result['error'] is not None:
         raise APIError(status=400, msg=result['error'])
 
     return {}
-
-
-def delete_newt(
-    newt_id: str,
-    id_service: IdentificationService,
-) -> Dict[str, Any]:
-    card_ids = id_service.card_service.get_matching_card_ids(newt_id)
-    if not card_ids:
-        raise APIError(status=404, msg=f"Newt {newt_id} not found")
-    
-    for id in card_ids:
-        result = id_service.card_service._delete_card(id, True, True)
-        if result['error'] is not None:
-            raise APIError(status=400, msg=result['error'])
-
-    return {}
-
