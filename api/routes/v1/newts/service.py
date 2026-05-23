@@ -12,22 +12,17 @@ def get_newt_by_id(
     id: str,
     id_service: IdentificationService,
 ) -> Dict[str, Any]:
-    proto = id_service.card_service.get_prototype(id)
-    if not proto:
-        raise APIError(status=404, msg=f"No prototype by ID {id}")
-
-    cards = sorted(proto["cards"], key=lambda c: c["created_at"])
-
-    first = cards[0]
-    last = cards[-1]
+    card = id_service.card_service.get_card(id)
+    if not card:
+        raise APIError(status=404, msg=f"No card by ID {id}")
 
     return {
-        "id": proto.get("prototype_id", None),
-        "projectId": proto.get("project_id", None),
-        "cardType": last.get("template_type", None),
-        "createdAt": first.get("created_at", None),
-        "sex": first.get("sex", None),
-        "status": first.get("status", None),
+        "id": card.get("card_id", None),
+        "projectId": card.get("project_id", None),
+        "cardType": card.get("template_type", None),
+        "createdAt": card.get("created_at", None),
+        "sex": card.get("sex", None),
+        "status": card.get("status", None),
     }
 
 
@@ -35,13 +30,13 @@ def get_cards_by_newt_id(
     id: str,
     id_service: IdentificationService,
 ) -> List[Dict[str, Any]]:
-    proto = id_service.card_service.get_prototype(id)
-    if not proto:
-        raise APIError(status=404, msg=f"No prototype by ID {id}")
+    card0 = id_service.card_service.get_card(id)
+    if not card0:
+        raise APIError(status=404, msg=f"No card by ID {id}")
 
     result: List[Dict[str, Any]] = []
 
-    for card in proto["cards"]:
+    for card in [card0]:  # easier legacy comp
         photo_objs = id_service.card_service.get_card_photos(card["card_id"])
 
         photos: List[str] = []
@@ -69,7 +64,7 @@ def get_cards_by_newt_id(
         result.append({
             "cardType": card["template_type"],
             "data": {k: v for k, v in {
-		"species": card.get("species", None),
+		        "species": card.get("species", None),
                 "dateFilled": card.get("date", None),
                 "bodyLength": card.get("length_body", None),
                 "tailLength": card.get("length_tail", None),

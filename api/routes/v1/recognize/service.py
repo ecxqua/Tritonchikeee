@@ -18,7 +18,7 @@ def _build_match(
     match: Dict[str, Any],
     id_service: IdentificationService,
 ) -> Dict[str, Any]:
-    id: str = match["prototype_id"]
+    id: str = match["card_id"]
     similarity: float = match["similarity_percent"]
 
     result: dict[str, Any] = {
