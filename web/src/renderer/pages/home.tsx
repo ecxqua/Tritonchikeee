@@ -113,10 +113,10 @@ export function Home() {
                     <div className="w-2 h-2 rounded-full bg-primary mt-1.5" />
                     <div className="flex-1 space-y-1">
                       <p className="text-sm font-medium leading-none">
-                        {activity.description}
+                        {activity.commit_id}
                       </p>
                       <p className="text-xs text-muted-foreground">
-                        {format(new Date(activity.timestamp), "dd MMM yyyy, HH:mm", { locale: ru })}
+                        {format(new Date(activity.created_at), "dd MMM yyyy, HH:mm", { locale: ru })}
                       </p>
                     </div>
                   </div>

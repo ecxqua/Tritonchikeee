@@ -352,8 +352,12 @@ export type ProjectStats = {
   totalRecognitions: number;
 
   recentActivity: {
-    description: string;
-    timestamp: string;
+    commit_id: string;
+    card_id: string;
+    species: string;
+    created_at: string;
+    
+    [key: string]: unknown;
   }[];
 
   speciesBreakdown: {
