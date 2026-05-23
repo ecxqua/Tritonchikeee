@@ -53,7 +53,7 @@ export function NewtDetail() {
         const config = await window.api.getConfig();
         const historyMap: Record<string, Record<string, any[]>> = {};
         await Promise.all(res.map(async (card) => {
-          const cardId = (card as any).id || card.cardType;
+          const cardId = newtId;
           const response = await fetch(`${config.apiBaseUrl}/cards/${cardId}/history`);
           if (response.ok) {
             historyMap[cardId] = await response.json();
