@@ -147,7 +147,7 @@ def patch_card_by_newt_id(
 
     print(f"{new_params=} END3")
 
-    if not id_service.commit_card(submission_id, **new_params):
+    if not id_service.commit_card(submission_id, card_data=new_params):
         raise APIError(status=500, msg="Something went wrong")
 
     return {}
