@@ -229,11 +229,6 @@ export async function getNewtCards(newtId: string): Promise<NewtCard[]> {
       photos: string[];
     }[]
   >(`/newts/${newtId}/cards`);
-    console.log("📡 RAW /newts/.../cards:", JSON.stringify(raw.map(c => ({
-      id: c.id,                    // 👈 самое важное!
-      cardType: c.cardType,
-      // ...
-    })), null, 2));
   return raw.map((card) => ({
     id: card.id,
     cardType: card.cardType as NewtCard["cardType"],
