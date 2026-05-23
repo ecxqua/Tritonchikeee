@@ -13,7 +13,8 @@ def complete_confirmation(
     params: Dict[str, str],
     id_service: IdentificationService
 ) -> Dict[str, Any]:
-    up = id_service.upload_service.get_upload(upload_id)
+    return { "status": "This endpoint is out of service." }
+    """up = id_service.upload_service.get_upload(upload_id)
     if not up or up["status"] not in ["pending"]:
         raise APIError(f"Invalid upload code {upload_id}", status=400)
 
@@ -25,4 +26,4 @@ def complete_confirmation(
         decision=decision,
         existing_card_id=existing_id,
         card_data=params
-    ))
+    ))"""

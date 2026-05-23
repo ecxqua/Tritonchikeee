@@ -12,6 +12,7 @@ from services.identification_service import create_identification_service, \
 async def lifespan(api: FastAPI):
     setup(migrate=True)
     service = create_identification_service()
+    service.refresh_reid_count()
 
     temp = TempStorage()
 
