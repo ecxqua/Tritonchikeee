@@ -126,7 +126,6 @@ def patch_card_by_newt_id(
             "sex": filtered_params.get("sex", None),
             "birth_year_exact": filtered_params.get("exactBirthDate", None),
             "birth_year_approx": filtered_params.get("estimatedBirthDate", None),
-            "photo_number": filtered_params.get("photoNumber", None),
             "origin_region": filtered_params.get("regionOfOrigin", None),
             "length_device": filtered_params.get("measurementDevice", None),
             "weight_device": filtered_params.get("scaleBrand", None),
@@ -136,18 +135,17 @@ def patch_card_by_newt_id(
             "parent_female_id": filtered_params.get("motherId", None),
             "length_total": filtered_params.get("totalLength", None),
             "water_body_name": filtered_params.get("waterBodyName", None),
-            "encounter_date": "",  # not tracked rn
             "meeting_time": filtered_params.get("encounterTime", None),
-            "photo_id": filtered_params.get("bellyPhotoNumber", None),
             "status": filtered_params.get("status", None),
             "water_body_number": filtered_params.get("waterBodyNumber", None),
-	    "species": filtered_params.get("species", None),
+	        "species": filtered_params.get("species", None),
 	    }.items() if v
     }
 
-    print(f"{new_params=} END3")
-
-    if not id_service.commit_card(submission_id, card_data=new_params):
+    if not id_service.commit_card(
+        submission_id,
+        card_data=new_params
+    ):
         raise APIError(status=500, msg="Something went wrong")
 
     return {}
