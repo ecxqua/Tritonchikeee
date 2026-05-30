@@ -162,10 +162,13 @@ def migrate_dataset() -> dict:
             print(f"⚠️ Папка не найдена: {species_folder}")
             continue
         
-        individual_folders = sorted([
-            f for f in species_folder.iterdir()
-            if f.is_dir() and f.name.isdigit()
-        ])
+        individual_folders = sorted(
+            [
+                f for f in species_folder.iterdir()
+                if f.is_dir() and f.name.isdigit()
+            ],
+            key=lambda f: int(f.name),
+        )
         
         print(f"   Найдено особей: {len(individual_folders)}")
         

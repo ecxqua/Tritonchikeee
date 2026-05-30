@@ -21,7 +21,6 @@ services/identification_service.py — Оркестратор идентифик
 """
 
 import logging
-from warnings import deprecated
 from pathlib import Path
 import uuid
 from datetime import datetime
@@ -35,7 +34,7 @@ import cv2
 import sqlite3
 
 from pipeline.deployment_yolo_new import process_single_image_sync
-from pipeline.deployment_dinov2_faiss import load_model, get_embedding, get_embedding_from_array, DEFAULT_TRANSFORM, search_vectors
+from pipeline.deployment_dinov2_faiss import load_model, get_embedding, get_embedding_from_array, DEFAULT_TRANSFORM, search_vectors, get_attention_heatmap
 from services.embedding_service import EmbeddingService
 from services.card_service import CardService, form_card_id, REQUIRED_FIELDS, validate_template_fields
 from services.upload_service import UploadService
@@ -471,6 +470,22 @@ class IdentificationService:
             result['error'] = "Не удалось вычислить эмбеддинг"
             return result
         result["embedding"] = embedding
+
+        # Генерация и сохранение overlay "Where Model Focuses" рядом с кропом
+        try:
+            heatmap_name = f"{Path(crop_path).stem}_where_model_focuses.png"
+            heatmap_path = os.path.join(Path(crop_path).parent, heatmap_name)
+
+            get_attention_heatmap(
+                crop_array=crop_array,
+                model=self.vit_model,
+                transform=self.transform,
+                device=self.device,
+                output_path=heatmap_path,
+            )
+        except Exception as e:
+            logger.warning(f"Не удалось сохранить heatmap: {e}")
+
         result['success'] = True
         return result
 

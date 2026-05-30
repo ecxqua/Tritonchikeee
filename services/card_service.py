@@ -14,7 +14,6 @@ services/card_service.py — CRUD операции для карточек ос�
 """
 
 import logging
-from warnings import deprecated
 from pathlib import Path
 from datetime import datetime
 import sqlite3
@@ -906,7 +905,11 @@ class CardService:
             ("reid_count",)
         )
         stats = cursor.fetchone()
-        return stats[0]
+        if not stats:
+            stats = [(0,)]
+            return stats[0]
+        else:
+            return stats[0]
     # -------------------------------------------------------------------------
     # READ (Карточки)
     # -------------------------------------------------------------------------
