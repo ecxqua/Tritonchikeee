@@ -36,7 +36,7 @@ import sqlite3
 from pipeline.deployment_yolo_new import process_single_image_sync
 from pipeline.deployment_dinov2_faiss import load_model, get_embedding, get_embedding_from_array, DEFAULT_TRANSFORM, search_vectors, get_attention_heatmap
 from services.embedding_service import EmbeddingService
-from services.card_service import CardService, form_card_id, REQUIRED_FIELDS, validate_template_fields
+from services.card_service import CardService, REQUIRED_FIELDS, validate_template_fields
 from services.upload_service import UploadService
 from services.project_service import ProjectService
 
@@ -151,7 +151,8 @@ class IdentificationService:
         territory: Optional[str] = None,
         species: Optional[str] = None,
         top_k: int = 20,
-        debug: bool = False
+        debug: bool = False,
+        heatmap: bool = False
     ) -> Dict[str, Any]:
         """
         Единый вход для анализа фотографии.
@@ -170,12 +171,15 @@ class IdentificationService:
             species: фильтр проектов по видам
             top_k: Количество кандидатов для возврата
             debug: Сохранять ли debug-артефакты YOLO
+            heatmap: Генерировать тепловую карту.
         
         Returns:
             Dict:
                 - upload_id: int (для confirm_decision)
                 - embedding: np.ndarray (вектор)
                 - crop_path: str (путь к кропу, ОСТОРОЖНО: временный путь)
+                - full_path: str (путь к полному фото, ОСТОРОЖНО: временный путь)
+                - heatmap_path: str (путь к тепловой карте, ОСТОРОЖНО: временный путь)
                 - candidates: List[Dict] (топ-K похожих особей)
                 - success: bool
                 - error: str | None
@@ -185,6 +189,7 @@ class IdentificationService:
             'embedding': None,
             'crop_path': None,
             'full_path': None,
+            'heatmap_path': None,
             'candidates': [],
             'success': False,
             'error': None
@@ -218,7 +223,7 @@ class IdentificationService:
                 
 
             # Обработка
-            process_result = self._get_crop_and_embedding(image_path, debug)
+            process_result = self._get_crop_and_embedding(image_path, heatmap, debug)
             if process_result['error']:
                 result['error'] = process_result['error']
                 return result
@@ -226,6 +231,7 @@ class IdentificationService:
             result['embedding'] = process_result['embedding']
             result['crop_path'] = process_result['crop_path']
             result['full_path'] = process_result['full_path']
+            result['heatmap_path'] = process_result.get('heatmap_path', None)
             
             # === 3. СОЗДАНИЕ ВРЕМЕННОЙ ЗАГРУЗКИ ===
             logger.info(f"Создание загрузки")
@@ -234,7 +240,8 @@ class IdentificationService:
                 crop_path=process_result['crop_path'],
                 full_path=process_result['full_path'],
                 embedding=process_result['embedding'],
-                expiry_hours=self.config.get('db', {}).get('expiry_hours', 24)
+                expiry_hours=self.config.get('db', {}).get('expiry_hours', 24),
+                heatmap_path=process_result.get('heatmap_path', None)
             )
             
             result['upload_id'] = upload_id
@@ -320,7 +327,8 @@ class IdentificationService:
             process_result: Dict[str, Any] = {
                 'embedding': upload['embedding'],
                 'crop_path': upload['crop_path'],
-                'full_path': upload['full_path']
+                'full_path': upload['full_path'],
+                'heatmap_path': upload.get('heatmap_path', None)
             }
             if decision == 'NEW':
                 # === НОВАЯ ОСОБЬ ===
@@ -381,6 +389,7 @@ class IdentificationService:
     def _get_crop_and_embedding(
         self,
         image_path: str,
+        heatmap: bool,
         debug: bool = False
     ) -> Dict[str, Any]:
         """
@@ -395,12 +404,14 @@ class IdentificationService:
             embedding: полученный по фото эмбеддинг
             crop_path: путь к вырезанному брюшку
             full_path: путь к полному фото
+            heatmap_path: путь к тепловой карте
             success: успешность операции
             error: сообщение об ошибке
         """
         result: Dict[str, Any] = {
             'embedding': None,
             'crop_path': None,
+            'heatmap_path': None,
             'full_path': None,
             'success': False,
             'error': None
@@ -472,19 +483,24 @@ class IdentificationService:
         result["embedding"] = embedding
 
         # Генерация и сохранение overlay "Where Model Focuses" рядом с кропом
-        try:
-            heatmap_name = f"{Path(crop_path).stem}_where_model_focuses.png"
-            heatmap_path = os.path.join(Path(crop_path).parent, heatmap_name)
+        if heatmap:
+            try:
+                logger.info(f"Обработка тепловой карты...")
+                heatmap_name = f"{Path(crop_path).stem}_where_model_focuses.png"
+                heatmap_path = os.path.join(Path(crop_path).parent, heatmap_name)
 
-            get_attention_heatmap(
-                crop_array=crop_array,
-                model=self.vit_model,
-                transform=self.transform,
-                device=self.device,
-                output_path=heatmap_path,
-            )
-        except Exception as e:
-            logger.warning(f"Не удалось сохранить heatmap: {e}")
+                if get_attention_heatmap(
+                    crop_array=crop_array,
+                    model=self.vit_model,
+                    transform=self.transform,
+                    device=self.device,
+                    output_path=heatmap_path,
+                ):
+                    result["heatmap_path"] = heatmap_path
+            except Exception as e:
+                logger.warning(f"Не удалось сохранить heatmap: {e}")
+        if not heatmap:
+            result["heatmap_path"] = None
 
         result['success'] = True
         return result
@@ -499,6 +515,7 @@ class IdentificationService:
         project_id: Optional[int] = None,
         template_type: str = "ИК-1",
         image_path: Optional[str] = None,
+        heatmap: bool = False,
         process_result: Optional[Dict[str, Any]] = None,
     ):
         """
@@ -511,6 +528,7 @@ class IdentificationService:
         
         Args:
             image_path: Полное изображение обработки (не указывать только при наличии process_result).
+            heatmap: Нужна ли тепловая карта (по умолчанию - нет, не указывать при наличии process_result).
             species: вид особи: "Карелина", "Ребристый".
             project_id: проект, куда сохранить особь.
             template_type: тип карточки: "ИК-1", "ИК-2"
@@ -520,19 +538,22 @@ class IdentificationService:
                     embedding: эмбеддинг фото
                     crop_path: путь к вырезанному брюшку
                     full_path: путь к полному фото
+                    heatmap_path: путь к тепловой карте
                 }
             По умолчанию обработка совершается.
         
         Returns Dict[str, Any]:
-            crop_path: путь к вырезанному брюшку
-            full_path: путь к полному фото
-            success: успешность операции
-            card_id: id сохранённой карточки
-            error: сообщение об ошибке
+            - crop_path: путь к вырезанному брюшку
+            - full_path: путь к полному фото
+            - heatmap_path: путь к тепловой карте
+            - success: успешность операции
+            - card_id: id сохранённой карточки
+            - error: сообщение об ошибке
         """
         result: Dict[str, Any] = {
             'crop_path': None,
             'full_path': None,
+            'heatmap_path': None,
             'card_id': None,
             'success': False,
             'error': None
@@ -544,7 +565,7 @@ class IdentificationService:
                     "Нет фото или результатов"
                     " для обработки и добавления особи."
                 )
-            process_result = self._get_crop_and_embedding(image_path)
+            process_result = self._get_crop_and_embedding(image_path, heatmap)
             if process_result['error']:
                 result['error'] = process_result['error']
                 return result
@@ -555,6 +576,7 @@ class IdentificationService:
         save_result = self.card_service._save_new_individual(
             photo_path_cropped=process_result['crop_path'],
             photo_path_full=process_result['full_path'],
+            heatmap_path=process_result.get('heatmap_path', None),
             template_type=template_type,
             species=species,
             project_id=project_id,  # 🔥 FK
@@ -580,6 +602,7 @@ class IdentificationService:
         result['success'] = True
         result['crop_path'] = save_result['crop_path']
         result['full_path'] = save_result['full_path']
+        result['heatmap_path'] = save_result['heatmap_path']
         return result
 
     # ==========================================================================
@@ -592,7 +615,7 @@ class IdentificationService:
         delete_photos: bool = True,
         confirm: bool = False
     ):
-        """Удалить карточку особи (+ FAISS)
+        """Удалить карточку особи (+ FAISS) с историей.
 
         Args:
             card_id (str): id карточки вида NT-K-1-ИК1
@@ -636,7 +659,10 @@ class IdentificationService:
         delete_file: bool = True
     ):
         """
+        ОПАСНАЯ ОПЕРАЦИЯ.
         Удаляет фото, привязанное к карточке (+ удаление эмбеддинга).
+        Удаление НЕ СОХРАНЯЕТСЯ КАК ФАКТ В ИСТОРИЮ.
+        Удаление фотографии приводит к удалению факта добавления фотографии из истории.
 
         Args:
             photo_id (str): id фото из таблицы photos, можно получить по card_service.get_card_photos()
@@ -657,11 +683,12 @@ class IdentificationService:
             delete_file=delete_file
         )
         # Удаление фото из FAISS
-        if self.embedding_service.delete(photo_id=photo_id):
-            self.embedding_service.commit()
-        else:
-            result['error'] = "Ошибка удаления из FAISS. Вектор не найден"
-            return result
+        if delete_result['photo_type'] == 'cropped':
+            if self.embedding_service.delete(photo_id=photo_id):
+                self.embedding_service.commit()
+            else:
+                result['error'] = "Ошибка удаления из FAISS. Вектор не найден"
+                return result
 
         result['success'] = True
         return result
@@ -675,6 +702,7 @@ class IdentificationService:
         card_data: Optional[dict] = {},
         template_type: Optional[str] = None,
         image_paths: Optional[list[str]] = None,
+        heatmap: bool = False,
         process_results: Optional[list[Dict[str, Any]]] = None,
     ) -> Dict[str, Any]:
         """Изменение данных уникальной карточки особи коммитом (история)
@@ -694,6 +722,7 @@ class IdentificationService:
                     embedding: эмбеддинг фото
                     crop_path: путь к вырезанному брюшку
                     full_path: путь к полному фото
+                    heatmap_path: путь к тепловой карте
                 }, ... ]
                 Пакет собирается из результатов обработки отдельных фото.
                 Словарь обработки отдельного фото можно подать в виде
@@ -723,7 +752,7 @@ class IdentificationService:
             process_results = list()
             if image_paths:
                 for image_path in image_paths:
-                    process_result = self._get_crop_and_embedding(image_path)
+                    process_result = self._get_crop_and_embedding(image_path, heatmap)
                     if process_result['error']:
                         result['error'] = process_result['error']
                         return result
@@ -746,30 +775,39 @@ class IdentificationService:
                         process_result['embedding'],
                         {
                             'card_id': card_id,
-                            'photo_path': save_result['crop_path'],
+                            'photo_path': save_result['photo_path'],
                         },
                         photo_id=photo_id
                     )
                     self.embedding_service.commit()
                     
                     # Обновить photos.embedding_index в БД
-                    self._update_photo_embedding_index(save_result['crop_path'], embedding_index)
+                    self._update_photo_embedding_index(save_result['photo_path'], embedding_index)
 
                     result['success'] = True
-                    result['crop_path'] = save_result['crop_path']
                     added_photo_ids.append(photo_id)
 
                     # Добавление полного фото отдельно.
                     save_full_result = self.card_service._add_photo_to_card(
                         process_result['full_path'],
                         prefix='full',
-                        card_id=card_id
+                        card_id=card_id,
+                        photo_group=save_result['photo_group']
                     )
                     added_photo_ids.append(save_full_result['photo_id'])
+                    # Добавление тепловой карты отдельно.
+                    if process_result['heatmap_path']:
+                        save_heatmap_result = self.card_service._add_photo_to_card(
+                            process_result['heatmap_path'],
+                            prefix='heatmap',
+                            card_id=card_id,
+                            photo_group=save_result['photo_group']
+                        )
+                        added_photo_ids.append(save_heatmap_result['photo_id'])
+                    logger.info(f"Фото к добавлению: {added_photo_ids}")
                 else:
                     result['error'] = save_result['error']
                     return result
-
         # 2. Обновление полей карточки с занесением в историю.
         update_result = self.card_service._commit_card(
             card_id=card_id,

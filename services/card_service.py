@@ -150,29 +150,29 @@ def filter_card_by_template(
     allowed = BASE_FIELDS | set(ALLOWED_FIELDS[template_type])
     return {k: v for k, v in card_data.items() if k in allowed}
 
-def get_next_prototype_number(cursor: sqlite3.Cursor, species: str) -> int:
-    """Возвращает следующий порядковый номер для животного данного вида."""
-    prefix = SPECIES_PREFIX.get(species, 'X')
-    cursor.execute('''
-        SELECT COUNT(DISTINCT CAST(
-            SUBSTR(
-                card_id,
-                6,
-                INSTR(SUBSTR(card_id, 6), '-') - 1
-            ) AS INTEGER)
-        )
-        FROM cards
-        WHERE card_id LIKE ?
-    ''', (f"NT-{prefix}-%",))
-    count = cursor.fetchone()[0]
-    return (count or 0) + 1
-
 def _get_next_photo_number(cursor: sqlite3.Cursor, card_id: str) -> str:
     """Автоматически генерирует порядковый номер фото (01, 02, 03...)."""
-    cursor.execute("SELECT COUNT(*) FROM photos WHERE card_id = ?", (card_id,))
-    count = cursor.fetchone()[0]
-    return f"{count + 1:02d}"
+    cursor.execute('''
+        SELECT MAX(CAST(photo_number AS INTEGER)) 
+        FROM photos 
+        WHERE card_id = ? AND photo_number IS NOT NULL AND photo_number != ''
+    ''', (card_id,))
+    max_num = cursor.fetchone()[0]
+    return f"{(max_num or 0) + 1:02d}"
 
+def _get_next_photo_group(cursor: sqlite3.Cursor, card_id: str) -> str:
+    """Генерирует следующий номер группы для серии фото (01, 02, ...)."""
+    cursor.execute('''
+        SELECT MAX(CAST(photo_group AS INTEGER)) 
+        FROM photos 
+        WHERE card_id = ? AND photo_group IS NOT NULL AND photo_group != ''
+    ''', (card_id,))
+    
+    max_group = cursor.fetchone()[0]
+    next_group = (max_group or 0) + 1
+    
+    # Если планируется >99 групп, замените :02d на :03d
+    return f"{next_group:02d}"
 def rename_photo(card_id: str, photo_path: str, suffix: str):
     """
         Переименовывает фотографию с уникальным названием,
@@ -260,11 +260,11 @@ class CardService:
         self,
         photo_path_cropped: Optional[str],
         photo_path_full: Optional[str],
+        heatmap_path: Optional[str],
         card_data: Dict[str, Any],
         species: str = "Неизвестный",
         project_id: Optional[int] = None,
         template_type: str = "ИК-1",
-        photo_number: Optional[str] = None,
         is_legacy: bool = False,
     ) -> Dict[str, Any]:
         """
@@ -276,6 +276,7 @@ class CardService:
         Args:
             photo_path_cropped (str): путь к кропу брюшка.
             photo_path_full (str): путь к полному фото.
+            heatmap_path (str): путь к тепловой карте.
             species (str): тип тритона для добавления.
             project_id (str): id проекта, куда добавится тритон (не рекомендуется оставлять пустым).
             card_id: номер карточки (рекомендуется оставить пустым!)
@@ -284,6 +285,8 @@ class CardService:
         
         Returns Dict[str, Any]:
             crop_path: путь к вырезанному брюшку
+            full_path: путь к полному фото
+            heatmap_path: путь к тепловой карте
             success: успешность операции
             photo_id: id сохранённой фотографии в photos
             card_id: id сохранённой карточки
@@ -292,6 +295,7 @@ class CardService:
         result = {
             "crop_path": None,
             "full_path": None,
+            "heatmap_path": None,
             "card_id": None,
             "photo_id": None,
             "full_photo_id": None,
@@ -313,11 +317,14 @@ class CardService:
         if photo_path_full:
             photo_path_full = rename_photo(card_id, photo_path_full, suffix="full")
             result['full_path'] = photo_path_full
+        if heatmap_path:
+            heatmap_path = rename_photo(card_id, heatmap_path, suffix="heatmap")
+            result['heatmap_path'] = heatmap_path
         logger.info(f"Сохранённый кроп: {photo_path_cropped}")
+        logger.info(f"Сохранённое полное фото: {photo_path_full}")
+        logger.info(f"Сохранённая теплова карта: {heatmap_path}")
         
-        if photo_number is None:
-            photo_number = _get_next_photo_number(cursor, card_id)
-        
+        photo_group = _get_next_photo_group(cursor, card_id)
         embedding_index = None
         
         try:
@@ -347,6 +354,7 @@ class CardService:
                 card_data.get('meeting_time'), card_data.get('status'),
                 card_data.get('water_body_number')
             ))
+            conn.commit()
 
             # Создание коммита инициализации.
             commit_id = str(uuid.uuid4())
@@ -382,16 +390,19 @@ class CardService:
             query = f"INSERT INTO commits ({', '.join(cols)}) VALUES ({placeholders})"
             cursor.execute(query, [commit_fields[c] for c in cols])
             logger.info(f"Коммит к особи {card_id} создан")
+            conn.commit()
             
-            # === ТАБЛИЦА 2: photos (кроп брюшка) ===
+            # === ТАБЛИЦА 2: photos (кроп, полное фото и тепловая карта брюшка) ===
+            added_photo_ids = list()
             if photo_path_cropped:
+                photo_number = _get_next_photo_number(cursor, card_id)
                 cursor.execute('''
                     INSERT INTO photos (
-                        card_id, photo_type, photo_number, photo_path,
+                        card_id, photo_type, photo_number, photo_group, photo_path,
                         date_taken, time_taken, is_main, is_processed, embedding_index, is_legacy
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ''', (
-                    card_id, 'cropped', photo_number, photo_path_cropped,
+                    card_id, 'cropped', photo_number, photo_group, photo_path_cropped,
                     card_data.get('date', datetime.now().strftime("%d.%m.%Y")),
                     card_data.get('meeting_time'), 
                     1,
@@ -401,15 +412,17 @@ class CardService:
                 ))
                 # Сохраняем photo_id
                 result['photo_id'] = cursor.lastrowid
+                added_photo_ids.append(result['photo_id'])
 
             if photo_path_full:
+                photo_number = _get_next_photo_number(cursor, card_id)
                 cursor.execute('''
                     INSERT INTO photos (
-                        card_id, photo_type, photo_number, photo_path,
+                        card_id, photo_type, photo_number, photo_group, photo_path,
                         date_taken, time_taken, is_main, is_processed, embedding_index, is_legacy
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ''', (
-                    card_id, 'full', photo_number, photo_path_full,
+                    card_id, 'full', photo_number, photo_group, photo_path_full,
                     card_data.get('date', datetime.now().strftime("%d.%m.%Y")),
                     card_data.get('meeting_time'), 
                     -1,
@@ -418,7 +431,35 @@ class CardService:
                     1 if is_legacy else 0
                 ))
                 # Сохраняем photo_id
-                result['full_photo_id'] = cursor.lastrowid
+                
+                full_photo_id = cursor.lastrowid
+                added_photo_ids.append(full_photo_id)
+            if heatmap_path:
+                photo_number = _get_next_photo_number(cursor, card_id)
+                cursor.execute('''
+                    INSERT INTO photos (
+                        card_id, photo_type, photo_number, photo_group, photo_path,
+                        date_taken, time_taken, is_main, is_processed, embedding_index, is_legacy
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ''', (
+                    card_id, 'heatmap', photo_number, photo_group, heatmap_path,
+                    card_data.get('date', datetime.now().strftime("%d.%m.%Y")),
+                    card_data.get('meeting_time'), 
+                    -1,
+                    1,
+                    -1,
+                    1 if is_legacy else 0
+                ))
+                # Сохраняем photo_id
+                heatmap_id = cursor.lastrowid
+                added_photo_ids.append(heatmap_id)
+            # Связываем коммит с добавленными фото (если есть)
+            if added_photo_ids:
+                for photo_id in added_photo_ids:
+                    cursor.execute(
+                        "INSERT OR IGNORE INTO commits_photos (commit_id, photo_id) VALUES (?, ?)",
+                        (commit_id, photo_id)
+                    )
             
             conn.commit()
 
@@ -436,23 +477,23 @@ class CardService:
         self,
         photo_path: str,
         prefix: str,
-        card_id: str
+        card_id: str,
+        photo_group: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Добавляет фото к карточке по card_id.
         
         Returns Dict[str, Any]:
-            crop_path: путь к вырезанному брюшку
-            full_path: путь к полному фото
+            photo_path: путь к фото
             success: успешность операции
             card_id: id сохранённой карточки
             photo_id: id добавленного вырезанного бюршка в photos
             error: сообщение об ошибке
         """
         result = {
-            "crop_path": None,
-            "full_path": None,
+            "photo_path": None,
             "card_id": card_id,
+            "photo_group": None,
             "photo_id": None,
             "success": False,
             "error": None
@@ -463,7 +504,10 @@ class CardService:
         card_data = self.get_card(card_id=card_id)
         # Переименование файла
         photo_path = rename_photo(card_id, photo_path, suffix=prefix)
-        result['crop_path'] = photo_path
+        if not photo_group:
+            photo_group = _get_next_photo_group(cursor, card_id)
+            result["photo_group"] = photo_group
+        result['photo_path'] = photo_path
         if not card_data:
             logger.error(f"При добавлении фотографии к карточке не вышло получить card_data")
             result["error"] = "При добавлении фотографии к карточке не вышло получить card_data"
@@ -471,11 +515,11 @@ class CardService:
         try:
             cursor.execute('''
                 INSERT INTO photos (
-                    card_id, photo_type, photo_number, photo_path,
+                    card_id, photo_type, photo_number, photo_group, photo_path,
                     date_taken, time_taken, is_main, is_processed, embedding_index, is_legacy
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
-                card_id, prefix, photo_number, photo_path,
+                card_id, prefix, photo_number, photo_group, photo_path,
                 card_data.get('date', datetime.now().strftime("%d.%m.%Y")),
                 card_data.get('meeting_time'), 
                 -1,
@@ -725,7 +769,8 @@ class CardService:
         delete_file: bool = True
     ):
         """
-        Удаляет фото, привязанное к карточке.
+        ОПАСНАЯ ОПЕРАЦИЯ.
+        Удаляет фото, привязанное к карточке и вырезает привязку коммита к факту добавления фото.
 
         Args:
             photo_id (str): id фото из таблицы photos, можно получить по card_service.get_card_photos()
@@ -738,6 +783,7 @@ class CardService:
         """
         result = {
             "success": False,
+            "photo_type": None,
             "error": None
         }
         conn = get_db_connection(self.db_path)
@@ -745,12 +791,14 @@ class CardService:
         
         try:
             # Удаление из таблицы
-            cursor.execute('SELECT photo_path FROM photos WHERE photo_id = ?', (photo_id,))
+            cursor.execute('SELECT photo_path, photo_type FROM photos WHERE photo_id = ?', (photo_id,))
             row = cursor.fetchone()
             photo_path = str()
             if row:
                 photo_path = str(row['photo_path'])
+                result['photo_type'] = row['photo_type']
             cursor.execute('DELETE FROM photos WHERE photo_id = ?', (photo_id,))
+            cursor.execute('DELETE FROM commits_photos WHERE photo_id = ?', (photo_id,))
             conn.commit()
 
             # Удаление файла
@@ -799,7 +847,10 @@ class CardService:
     # READ (История)
     # -------------------------------------------------------------------------
     def get_commit_history(self, card_id: str, limit: int = None) -> list[dict]:
-        """Возвращает историю изменений особи как список коммитов (снапшотов)."""
+        """
+            Возвращает историю изменений особи как список коммитов (снапшотов).
+            + в photo_ids возвращает массив photo_id, добавленных коммитом (ссылается на таблицу photos).
+        """
         conn = get_db_connection(self.db_path)
         cursor = conn.cursor()
         try:
@@ -915,12 +966,16 @@ class CardService:
     # -------------------------------------------------------------------------
     
     def get_card_photos(self, card_id: str) -> List[Dict[str, Any]]:
-        """Получает все фотографии карточки из базы данных."""
+        """
+            Получает все фотографии карточки из базы данныхю
+            Returns:
+                [{"photo_id": ..., "photo_path": ..., ...}, ...]
+        """
         conn = get_db_connection(self.db_path)
         cursor = conn.cursor()
         
         cursor.execute('''
-            SELECT photo_id, photo_type, photo_number, photo_path, 
+            SELECT photo_id, photo_type, photo_number, photo_group, photo_path, 
                    date_taken, is_main, is_legacy, embedding_index
             FROM photos
             WHERE card_id = ?
@@ -931,7 +986,29 @@ class CardService:
         conn.close()
         
         return photos
-    
+
+    def get_card_photos_grouped(self, card_id: str) -> dict:
+        """
+            Делает то же самое, что и get_card_photos(), но структурирует фотографии
+            по photo_group (по одной операции добавления: соответствие кроп-полный-карта).
+
+            Фото без групп выводятся в группу "default".
+
+            Returns (dict):
+                - {photo_group_1}: [{"photo_id": ..., "photo_path": ..., ...}, ...]
+                - {photo_group_2}: ...
+        """
+        photos = self.get_card_photos(card_id)
+        result = {}
+        for photo in photos:
+            photo_group = photo.get('photo_group', None)
+            if not photo_group:
+                photo_group = "default"
+            if photo_group not in result:
+                result[photo_group] = []
+            result[photo_group].append(photo)
+        return result
+
     def get_card(self, card_id: str) -> Optional[Dict[str, Any]]:
         """Получает данные карточки по ID, автоматически фильтруя поля по шаблону."""
         conn = get_db_connection(self.db_path)
@@ -949,7 +1026,26 @@ class CardService:
         conn.close()
         
         return filter_card_by_template(dict(row) if row else None)
-    
+
+    def is_card_exist(self, card_id: str) -> bool:
+        """Проверяет, существует ли особь."""
+        conn = get_db_connection(self.db_path)
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT card_id
+            FROM cards
+            WHERE card_id = ?
+        ''', (card_id,))
+        
+        row = cursor.fetchone()
+        if not row:
+            conn.close()
+            return False
+        else:
+            conn.close()
+            return True
+
     def get_cards_by_project(self, project_id: int) -> List[Dict[str, Any]]:
         """Получает список карточек по проекту."""
         conn = get_db_connection(self.db_path)

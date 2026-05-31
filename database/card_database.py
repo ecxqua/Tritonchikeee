@@ -88,6 +88,7 @@ def init_database():
             card_id TEXT,
             photo_type TEXT,
             photo_number TEXT,
+            photo_group TEXT,
             photo_path TEXT,
             date_taken TEXT,
             time_taken TEXT,
@@ -109,6 +110,7 @@ def init_database():
             project_id INTEGER NOT NULL,
             crop_path TEXT NOT NULL,
             full_path TEXT,
+            heatmap_path TEXT,
             embedding TEXT NOT NULL,
             status TEXT DEFAULT 'pending',
             card_id TEXT,
@@ -157,8 +159,9 @@ def init_database():
     # -------------------------------------------------------------------------
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS commits_photos (
-            commit_id TEXT PRIMARY KEY,
+            commit_id TEXT,
             photo_id INTEGER,
+            PRIMARY KEY (commit_id, photo_id),
             FOREIGN KEY(commit_id) REFERENCES commits(commit_id),
             FOREIGN KEY(photo_id) REFERENCES photos(photo_id)
         )

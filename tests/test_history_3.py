@@ -8,10 +8,12 @@ service = create_identification_service()
 
 # Коммит, редактируем особь. Процесс идентичен заполнению карточки
 # При создании, но с указанием id картчоки
-service.commit_card(
-    card_id="NT-K-88",
-    # Добавляем коммитом фотографий!
-    image_paths=["data/input/image.png"],
-)
+# if service.card_service.is_card_exist("NT-K-85"):
+#     service.commit_card(
+#         card_id="NT-K-85",
+#         # Добавляем коммитом фотографий!
+#         image_paths=["data/input/image.png"]
+#     )
 
-print(service.card_service.get_field_history("NT-K-1", "weight"))
+print(service.card_service.get_field_history("NT-K-85", "weight"))
+print(service.card_service.get_commit_history("NT-K-85"))

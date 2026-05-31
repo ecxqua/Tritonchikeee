@@ -13,7 +13,8 @@ start_time = time.time()
 result = service.identify_and_prepare(
     image_path="data/input/image.png",
     top_k=5,
-    debug=True
+    debug=True,
+    heatmap=True
 )
 
 print(result["candidates"])

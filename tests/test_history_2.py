@@ -9,7 +9,7 @@ service = create_identification_service()
 # Коммит, редактируем особь. Процесс идентичен заполнению карточки
 # При создании, но с указанием id картчоки
 service.commit_card(
-    card_id="NT-K-5",
+    card_id="NT-K-90",
     # Без шаблона можно редактировать все поля без ограничений валидации шаблонов.
     # template_type="ИК-1",
     card_data = {
@@ -17,4 +17,4 @@ service.commit_card(
     }
 )
 
-print(service.card_service.get_field_history("NT-K-5", "weight"))
+print(service.card_service.get_field_history("NT-K-90", "weight"))

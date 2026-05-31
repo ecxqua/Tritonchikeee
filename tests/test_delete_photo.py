@@ -5,4 +5,4 @@ import time
 # 1. Инициализация
 service = create_identification_service()
 
-print(service.delete_photo(612, delete_file=True))
+print(service.delete_photo(628, delete_file=True))

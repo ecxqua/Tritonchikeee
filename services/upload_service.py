@@ -72,6 +72,7 @@ class UploadService:
                 project_id INTEGER NOT NULL,
                 crop_path TEXT NOT NULL,
                 full_path TEXT,
+                heatmap_path TEXT,
                 embedding TEXT NOT NULL,
                 status TEXT DEFAULT 'pending',
                 card_id TEXT,
@@ -100,7 +101,8 @@ class UploadService:
         crop_path: str,
         full_path: str,
         embedding: Any,
-        expiry_hours: int = UPLOAD_EXPIRY_HOURS
+        expiry_hours: int = UPLOAD_EXPIRY_HOURS,
+        heatmap_path: str | None = None
     ) -> int:
         """CREATE: Создать временную загрузку."""
         if embedding is None or len(embedding) == 0:
@@ -115,9 +117,9 @@ class UploadService:
         
         try:
             cursor.execute('''
-                INSERT INTO uploads (project_id, crop_path, full_path, embedding, status, created_at, expires_at)
-                VALUES (?, ?, ?, ?, 'pending', ?, ?)
-            ''', (-1, crop_path, full_path, embedding_json, now.isoformat(), expires_at.isoformat()))
+                INSERT INTO uploads (project_id, crop_path, full_path, heatmap_path, embedding, status, created_at, expires_at)
+                VALUES (?, ?, ?, ?, ?, 'pending', ?, ?)
+            ''', (-1, crop_path, full_path, heatmap_path, embedding_json, now.isoformat(), expires_at.isoformat()))
             
             upload_id = cursor.lastrowid
             conn.commit()
@@ -137,7 +139,7 @@ class UploadService:
         cursor = conn.cursor()
         
         cursor.execute('''
-            SELECT id, project_id, crop_path, full_path, embedding, status, card_id, created_at, expires_at
+            SELECT id, project_id, crop_path, full_path, heatmap_path, embedding, status, card_id, created_at, expires_at
             FROM uploads
             WHERE id = ?
         ''', (upload_id,))
@@ -222,13 +224,13 @@ class UploadService:
             cond = ""
             if expired:
                 cond = '''
-                    SELECT id, crop_path, full_path FROM uploads
+                    SELECT id, crop_path, full_path, heatmap_path FROM uploads
                     WHERE status = 'pending' AND expires_at < ?
                 '''
                 cursor.execute(cond, (now,))
             else:
                 cond = '''
-                    SELECT id, crop_path, full_path FROM uploads
+                    SELECT id, crop_path, full_path, heatmap_path FROM uploads
                 '''
                 cursor.execute(cond)
             
@@ -239,8 +241,8 @@ class UploadService:
             
             # 2. Удаляем файлы с диска
             deleted_files = 0
-            for upload_id, crop_path, full_path in expired_uploads:
-                for file_path in (crop_path, full_path):
+            for upload_id, crop_path, full_path, heatmap_path in expired_uploads:
+                for file_path in (crop_path, full_path, heatmap_path):
                     try:
                         if delete_file(file_path):
                             deleted_files += 1
@@ -285,14 +287,14 @@ class UploadService:
         
         if project_id:
             cursor.execute('''
-                SELECT id, project_id, crop_path, full_path, embedding, status, created_at, expires_at
+                SELECT id, project_id, crop_path, full_path, heatmap_path, embedding, status, created_at, expires_at
                 FROM uploads
                 WHERE status = 'pending' AND project_id = ?
                 ORDER BY created_at DESC
             ''', (project_id,))
         else:
             cursor.execute('''
-                SELECT id, project_id, crop_path, full_path, embedding, status, created_at, expires_at
+                SELECT id, project_id, crop_path, full_path, heatmap_path, embedding, status, created_at, expires_at
                 FROM uploads
                 WHERE status = 'pending'
                 ORDER BY created_at DESC
