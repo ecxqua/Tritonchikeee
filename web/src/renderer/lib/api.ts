@@ -237,19 +237,8 @@ export async function getNewtCards(newtId: string): Promise<NewtCard[]> {
   }));
 }
 
-export async function getNewtHistory(newtId: string): Promise<HistoryRecord[]> {
-  await new Promise(r => setTimeout(r, 300));
-
-  return [
-    {
-      id: "1",
-      field: "weight",
-      oldValue: "4",
-      newValue: "5",
-      changedAt: new Date().toISOString(),
-      changedBy: "Researcher",
-    },
-  ];
+export async function getNewtHistory(newtId: string): Promise<Record<string, any[]>> {
+  return apiFetch<Record<string, any[]>>(`/cards/${newtId}/history`);
 }
 
 export async function updateNewtCardApi(req: {

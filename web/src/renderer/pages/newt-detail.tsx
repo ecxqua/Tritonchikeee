@@ -23,8 +23,7 @@ export function NewtDetail() {
   const { toast } = useToast();
   const [newt, setNewt] = useState<Newt | null>(null);
   const [cards, setCards] = useState<NewtCard[]>([]);
-  const [history, setHistory] = useState<HistoryRecord[]>([]);
-  const [cardHistories, setCardHistories] = useState<Record<string, Record<string, any[]>>>({});
+  const [history, setHistory] = useState<Record<string, any[]>>({});
   const [newtLoading, setNewtLoading] = useState(true);
   const [cardLoading, setCardLoading] = useState(true);
   const [historyLoading, setHistoryLoading] = useState(true);
@@ -44,28 +43,13 @@ export function NewtDetail() {
       setNewtLoading(false);
     });
 
-    getNewtCards(newtId).then(async (res) => {
+    getNewtCards(newtId).then((res) => {
       setCards(res);
       setCardLoading(false);
-      
-      // Изменения с историей
-      try {
-        const config = await window.api.getConfig();
-        const historyMap: Record<string, Record<string, any[]>> = {};
-        await Promise.all(res.map(async (card) => {
-          const cardId = newtId;
-          const response = await fetch(`${config.apiBaseUrl}/cards/${cardId}/history`);
-          if (response.ok) {
-            historyMap[cardId] = await response.json();
-          }
-        }));
-        setCardHistories(historyMap);
-      } catch (err) {
-        console.error("Failed to load card histories:", err);
-      }
     });
 
     getNewtHistory(newtId).then((res) => {
+      console.log(res);
       setHistory(res);
       setHistoryLoading(false);
     });
@@ -205,8 +189,8 @@ export function NewtDetail() {
   const renderCard = (card: NewtCard, index: number) => {
     const cardData = card.data || {};
     const data = editingIndex === index ? editData[index] : cardData;
-    const cardId = (card as any).id || card.cardType;
-    const cardHistory = cardHistories[cardId] || {};
+    // const cardId = (card as any).id || card.cardType;
+    // const cardHistory = cardHistories[cardId] || {};
 
     const renderFieldsForCardType = () => {
       if (card.cardType === "ИК-1") {
@@ -360,20 +344,22 @@ export function NewtDetail() {
           </div>
 
           {/* Integrated Card History Section */}
-          {Object.keys(cardHistory).length > 0 && (
+          {Object.values(history).some(arr => Array.isArray(arr) && arr.length > 0) && (
             <div className="pt-4 border-t mt-4">
               <h4 className="text-sm font-medium mb-2 text-muted-foreground">История изменений по полям</h4>
               <div className="space-y-2 max-h-48 overflow-y-auto pr-2">
-                {Object.entries(cardHistory).map(([field, records]) => (
-                  <div key={field} className="space-y-1">
-                    <div className="text-xs font-semibold text-primary uppercase tracking-wide">{field}</div>
-                    {(records as any[]).map((rec: any, idx: number) => (
-                      <div key={idx} className="text-xs text-muted-foreground pl-3 border-l-2 border-border/50">
-                        {rec.oldValue !== undefined ? `${rec.oldValue} → ${rec.newValue}` : String(rec)}
-                      </div>
-                    ))}
-                  </div>
-                ))}
+                {Object.entries(history)
+                  .filter(([_, records]) => Array.isArray(records) && records.length > 0)
+                  .map(([field, records]) => (
+                    <div key={field} className="space-y-1">
+                      <div className="text-xs font-semibold text-primary uppercase tracking-wide">{field}</div>
+                      {(records as any[]).map((rec: any, idx: number) => (
+                        <div key={idx} className="text-xs text-muted-foreground pl-3 border-l-2 border-border/50">
+                          {rec.oldValue !== undefined ? `${rec.oldValue} → ${rec.newValue}` : String(rec)}
+                        </div>
+                      ))}
+                    </div>
+                  ))}
               </div>
             </div>
           )}
@@ -430,16 +416,25 @@ export function NewtDetail() {
         <CardContent>
           {historyLoading ? (
             <Skeleton className="h-24 w-full" />
-          ) : history.length === 0 ? (
+          ) : Object.values(history).some(arr => Array.isArray(arr) && arr.length > 0) ? (
+            <div className="space-y-3">
+              {Object.entries(history)
+                .filter(([_, records]) => Array.isArray(records) && records.length > 0)
+                .map(([field, records]) => (
+                  <div key={field} className="space-y-1">
+                    <div className="text-sm font-semibold text-primary uppercase tracking-wide">{field}</div>
+                    {(records as any[]).map((rec: any, idx: number) => (
+                      <div key={idx} className="text-sm text-muted-foreground pl-3 border-l-2 border-border/50 py-1">
+                        {rec.oldValue !== undefined ? `${rec.oldValue} → ${rec.newValue}` : String(rec)}
+                      </div>
+                    ))}
+                  </div>
+                ))}
+            </div>
+          ) : (
             <div className="text-sm text-muted-foreground">
               История пуста
             </div>
-          ) : (
-            history.map((record) => (
-              <div key={record.id} className="py-2 border-b text-sm">
-                {record.field}: {record.oldValue} → {record.newValue}
-              </div>
-            ))
           )}
         </CardContent>
       </Card>
