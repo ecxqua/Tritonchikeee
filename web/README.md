@@ -4,7 +4,7 @@ git clone https://github.com/ecxqua/Tritonchikeee.git
 cd Tritonchikapp
 cd web
 npm install
-npm run start
+npm run make
 ```
 
 ## Notes
