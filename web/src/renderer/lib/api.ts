@@ -28,8 +28,8 @@ export type Match = {
 };
 
 export type RecognizeResponse =
-  | { status: "not_found" }
-  | { status: "found"; matches: Match[] };
+  | { status: "not_found"; heatmap?: string }
+  | { status: "found"; matches: Match[]; heatmap?: string };
 
 export async function recognizeNewt(params: {
   photo: File;

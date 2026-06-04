@@ -1,11 +1,11 @@
-import { recognizeNewt, listProjects, getNewt, getNewtCards } from "@/lib/api";
+import { recognizeNewt, listProjects, getNewt, getNewtCards, type RecognizeResponse } from "@/lib/api";
 import { useEffect, useState, useRef } from "react";
 import { Link } from "wouter";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Progress } from "@/components/ui/progress";
-import { UploadCloud, ScanSearch, CheckCircle2, XCircle, ChevronRight, Image as ImageIcon, PlusCircle, Eraser } from "lucide-react";
+import { UploadCloud, ScanSearch, CheckCircle2, XCircle, ChevronRight, Image as ImageIcon, PlusCircle, Eraser, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { PhotoGallery } from "@/components/photo-gallery";
 import { setNewtOpenedFromRecognize } from "@/lib/return-from-recognize";
@@ -27,65 +27,68 @@ export function Recognize() {
     Record<string, { isLoading: boolean; projectId?: string; sex?: string; status?: string; cardTypes: string[] }>
   >({});
 
-  const [result, setResult] = useState<any>(null);
+  const [result, setResult] = useState<RecognizeResponse | null>(null);
   const [isPending, setIsPending] = useState(false);
   const [sessionRestored, setSessionRestored] = useState(false);
+
+  // NEW: State to control the heatmap overlay visibility
+  const [showHeatmap, setShowHeatmap] = useState(false);
 
   const [projects, setProjects] = useState<{ id: number; name: string }[]>([]);
 
   useEffect(() => {
-  const snap = loadRecognizeSession();
-  if (snap) {
-    setResult(snap.result ?? null);
-    setScope(snap.scope);
-    setProjectId(snap.projectId);
-    setExpandedNewtId(snap.expandedNewtId ?? null);
-    setNewtSummaryById(snap.newtSummaryById ?? {});
-    
-    // ← Восстанавливаем превью и фото из сессии
-    if (snap.previewDataUrl && snap.photoName) {
-      setPreviewUrl(snap.previewDataUrl);
-      // Конвертируем data URL обратно в File
-      fetch(snap.previewDataUrl)
-        .then(res => res.blob())
-        .then(blob => {
-          const file = new File([blob], snap.photoName!, { type: blob.type });
-          setPhoto(file);
-        })
-        .catch(console.warn);
+    const snap = loadRecognizeSession();
+    if (snap) {
+      setResult(snap.result ?? null);
+      setScope(snap.scope);
+      setProjectId(snap.projectId);
+      setExpandedNewtId(snap.expandedNewtId ?? null);
+      setNewtSummaryById(snap.newtSummaryById ?? {});
+      
+      // ← Восстанавливаем превью и фото из сессии
+      if (snap.previewDataUrl && snap.photoName) {
+        setPreviewUrl(snap.previewDataUrl);
+        // Конвертируем data URL обратно в File
+        fetch(snap.previewDataUrl)
+          .then(res => res.blob())
+          .then(blob => {
+            const file = new File([blob], snap.photoName!, { type: blob.type });
+            setPhoto(file);
+          })
+          .catch(console.warn);
+      }
     }
-  }
-  setSessionRestored(true);
-}, []);
+    setSessionRestored(true);
+  }, []);
 
   useEffect(() => {
-  if (!sessionRestored || isPending) return;
-  
-  saveRecognizeSession({
-    result,
-    scope,
-    projectId,
-    expandedNewtId,
-    newtSummaryById,
-    previewDataUrl: previewUrl, // ← сохраняем data URL
-    photoName: photo?.name,     // ← сохраняем имя файла
-  });
-}, [sessionRestored, isPending, result, scope, projectId, expandedNewtId, newtSummaryById, previewUrl, photo]);
+    if (!sessionRestored || isPending) return;
+    
+    saveRecognizeSession({
+      result,
+      scope,
+      projectId,
+      expandedNewtId,
+      newtSummaryById,
+      previewDataUrl: previewUrl, // ← сохраняем data URL
+      photoName: photo?.name,     // ← сохраняем имя файла
+    });
+  }, [sessionRestored, isPending, result, scope, projectId, expandedNewtId, newtSummaryById, previewUrl, photo]);
 
   useEffect(() => {
     listProjects().then(setProjects);
   }, []);
 
-    function fileToDataUrl(file: File): Promise<string> {
-      return new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(reader.result as string);
-        reader.onerror = reject;
-        reader.readAsDataURL(file);
-      });
-    }
+  function fileToDataUrl(file: File): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result as string);
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+  }
 
-    const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
       const file = e.target.files[0];
       setPhoto(file);
@@ -93,6 +96,7 @@ export function Recognize() {
       setPreviewUrl(dataUrl); // ← используем data URL вместо blob
       setResult(null);
       setExpandedNewtId(null);
+      setShowHeatmap(false); // NEW: Close overlay if open
       clearRecognizeSession();
     }
   };
@@ -107,6 +111,7 @@ export function Recognize() {
       setPreviewUrl(dataUrl);
       setResult(null);
       setExpandedNewtId(null);
+      setShowHeatmap(false); // NEW: Close overlay if open
       clearRecognizeSession();
     }
   };
@@ -116,6 +121,7 @@ export function Recognize() {
 
     setIsPending(true);
     setResult(null);
+    setShowHeatmap(false); // NEW: Close overlay before new scan
 
     const res = await recognizeNewt({
       photo,
@@ -128,14 +134,15 @@ export function Recognize() {
   };
 
   const resetRecognitionSession = () => {
-  clearRecognizeSession();
-  setResult(null);
-  setExpandedNewtId(null);
-  setNewtSummaryById({});
-  setPhoto(null);
-  setPreviewUrl(null);
-  setIsPending(false);
-};
+    clearRecognizeSession();
+    setResult(null);
+    setExpandedNewtId(null);
+    setNewtSummaryById({});
+    setPhoto(null);
+    setPreviewUrl(null);
+    setIsPending(false);
+    setShowHeatmap(false); // NEW: Close overlay before new scan
+  };
 
   const loadNewtSummary = async (newtId: string) => {
     if (newtSummaryById[newtId]) return;
@@ -271,6 +278,16 @@ export function Recognize() {
                 ) : (
                   <><ScanSearch className="w-5 h-5" /> Распознать особь</>
                 )}
+              </Button>
+
+              <Button 
+                className="w-full mt-3 gap-2" 
+                size="lg" 
+                variant="outline"
+                disabled={!result?.heatmap || isPending}
+                onClick={() => setShowHeatmap(true)}
+              >
+                <ImageIcon className="w-5 h-5" /> Показать тепловую карту
               </Button>
             </CardContent>
           </Card>
@@ -432,6 +449,29 @@ export function Recognize() {
           )}
         </div>
       </div>
+
+      {showHeatmap && result?.heatmap && (
+        <div 
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-200"
+          onClick={() => setShowHeatmap(false)}
+        >
+          <div className="relative max-w-4xl max-h-[90vh] w-full flex items-center justify-center" onClick={(e) => e.stopPropagation()}>
+            <img 
+              src={result.heatmap.startsWith('data:') ? result.heatmap : `data:image/png;base64,${result.heatmap}`}
+              alt="Heatmap" 
+              className="max-w-full max-h-[85vh] object-contain rounded-lg shadow-2xl border border-white/10"
+            />
+            <Button
+              variant="secondary"
+              size="icon"
+              className="absolute -top-4 -right-4 rounded-full w-10 h-10 shadow-lg border border-border"
+              onClick={() => setShowHeatmap(false)}
+            >
+              <X className="w-5 h-5" />
+            </Button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
