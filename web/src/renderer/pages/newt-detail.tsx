@@ -355,7 +355,7 @@ export function NewtDetail() {
                       <div className="text-xs font-semibold text-primary uppercase tracking-wide">{field}</div>
                       {(records as any[]).map((rec: any, idx: number) => (
                         <div key={idx} className="text-xs text-muted-foreground pl-3 border-l-2 border-border/50">
-                          {rec.oldValue !== undefined ? `${rec.oldValue} → ${rec.newValue}` : String(rec)}
+                          {rec.old_value != null ? `${rec.old_value} → ${rec.new_value}` : `→ ${rec.new_value}`}
                         </div>
                       ))}
                     </div>
@@ -425,7 +425,7 @@ export function NewtDetail() {
                     <div className="text-sm font-semibold text-primary uppercase tracking-wide">{field}</div>
                     {(records as any[]).map((rec: any, idx: number) => (
                       <div key={idx} className="text-sm text-muted-foreground pl-3 border-l-2 border-border/50 py-1">
-                        {rec.oldValue !== undefined ? `${rec.oldValue} → ${rec.newValue}` : String(rec)}
+                        {rec.old_value != null ? `${rec.old_value} → ${rec.new_value}` : `→ ${rec.new_value}`}
                       </div>
                     ))}
                   </div>
