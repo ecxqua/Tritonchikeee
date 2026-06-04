@@ -20,6 +20,25 @@ export function Home() {
     });
   }, []);
 
+const extractChanges = (activity) => {
+  const ignoreKeys = new Set([
+    "commit_id", "card_id", "created_at", "photo_ids", "date"
+  ]);
+  
+  const changes = [];
+  for (const [key, value] of Object.entries(activity)) {
+    if (ignoreKeys.has(key)) continue;
+    if (value === null || value === undefined || value === "") continue;
+
+    const label = key
+      .replace(/_/g, " ")
+      .replace(/\b\w/g, (char) => char.toUpperCase());
+      
+    changes.push({ key, label, value: String(value) });
+  }
+  return changes;
+};
+
   return (
     <div className="p-8 max-w-7xl mx-auto space-y-8 animate-in fade-in duration-500">
       <div className="flex flex-col gap-2">
@@ -108,19 +127,45 @@ export function Home() {
               </div>
             ) : stats?.recentActivity?.length ? (
               <div className="space-y-6">
-                {stats.recentActivity.map((activity, i) => (
-                  <div key={i} className="flex items-center gap-4">
-                    <div className="w-2 h-2 rounded-full bg-primary mt-1.5" />
-                    <div className="flex-1 space-y-1">
-                      <p className="text-sm font-medium leading-none">
-                        {activity.commit_id}
-                      </p>
-                      <p className="text-xs text-muted-foreground">
-                        {format(new Date(activity.created_at), "dd MMM yyyy, HH:mm", { locale: ru })}
-                      </p>
+                {stats.recentActivity.map((activity) => {
+                  const changes = extractChanges(activity);
+                  
+                  return (
+                    <div
+                      key={activity.commit_id || activity.card_id}
+                      className="group flex flex-col gap-2 rounded-lg border border-transparent p-3 transition-colors hover:border-border hover:bg-muted/30"
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm font-semibold tracking-tight">
+                          {activity.card_id}
+                        </span>
+                        <span className="text-xs text-muted-foreground tabular-nums">
+                          {format(new Date(activity.created_at), "dd MMM yyyy, HH:mm", { locale: ru })}
+                        </span>
+                      </div>
+
+                      {changes.length > 0 ? (
+                        <div className="ml-2 mt-1 space-y-1.5 border-l-2 border-primary/30 pl-3">
+                          {changes.map(({ label, value }) => (
+                            <div key={label} className="flex items-center gap-2 text-xs">
+                              <span className="text-muted-foreground min-w-[140px]">
+                                {label}
+                              </span>
+                              <span className="text-primary font-medium">→</span>
+                              <span className="font-medium text-foreground">
+                                {value}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="ml-2 mt-1 text-xs italic text-muted-foreground border-l-2 border-muted pl-3">
+                          Без дополнительных изменений
+                        </div>
+                      )}
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             ) : (
               <div className="text-sm text-muted-foreground text-center py-8">

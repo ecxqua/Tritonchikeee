@@ -180,6 +180,7 @@ export type Newt = {
 };
 
 export type NewtCard = {
+  id: string;
   cardType: "ИК-1" | "ИК-2" | "КВ-1" | "КВ-2";
   data: Record<string, any>;
   photos: string[];
@@ -222,13 +223,14 @@ export async function getNewt(newtId: string): Promise<Newt | null> {
 export async function getNewtCards(newtId: string): Promise<NewtCard[]> {
   const raw = await apiFetch<
     {
+      id: string;
       cardType: string;
       data: Record<string, string | null>;
       photos: string[];
     }[]
   >(`/newts/${newtId}/cards`);
-
   return raw.map((card) => ({
+    id: card.id,
     cardType: card.cardType as NewtCard["cardType"],
     data: card.data,
     photos: card.photos ?? [],
