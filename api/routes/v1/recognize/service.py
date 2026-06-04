@@ -93,7 +93,8 @@ def complete_recognize(
             territory=territories,
             species=species,
             top_k=k,
-            debug=True
+            debug=True,
+            heatmap=True
         )
 
         error = res["error"]
@@ -101,12 +102,17 @@ def complete_recognize(
             return {"status": "not_found"}
             # raise APIError(status=500, msg=error)
 
+        with open(res["heatmap_path"], 'rb') as heatmap_file:
+            heatmap_b64 = base64.b64encode(heatmap_file.read()).decode("utf-8")
+            heatmap_b64 = f"data:image/png;base64,{heatmap_b64}"
+
         return {
             "status": "found",
             "matches": [
                 _build_match(match, id_service)
                 for match in res["candidates"]
-            ]
+            ],
+            "heatmap": heatmap_b64
         }
     except ValueError:
         # raise APIError(status=400, msg=str(ex))
