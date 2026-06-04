@@ -104,7 +104,7 @@ def patch_card_by_newt_id(
         raise APIError(status=404, msg=f"No card by ID {id}")
 
     template_type = params["cardType"]
-    submission_id = f"{id}-{template_type.replace('-', '')}"
+    submission_id = id # f"{id}-{template_type.replace('-', '')}"
 
     filtered_params = {
 	    key: value
@@ -141,6 +141,7 @@ def patch_card_by_newt_id(
 	        "species": filtered_params.get("species", None),
 	    }.items() if v
     }
+    print(f"{new_params=}")
 
     if not id_service.commit_card(
         submission_id,

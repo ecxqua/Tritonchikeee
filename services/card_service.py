@@ -1127,3 +1127,4 @@ class CardService:
     def get_required_card_fields(self):
         """Возвращает словарь обязательных полей для каждого шаблона карты."""
         return REQUIRED_FIELDS
+
