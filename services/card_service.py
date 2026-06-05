@@ -1019,7 +1019,7 @@ class CardService:
         """Получает данные карточки по ID, автоматически фильтруя поля по шаблону."""
         conn = get_db_connection(self.db_path)
         cursor = conn.cursor()
-        
+
         cursor.execute('''
             SELECT i.*, p.name as project_name
             FROM cards i
@@ -1028,7 +1028,6 @@ class CardService:
         ''', (card_id,))
         
         row = cursor.fetchone()
-        row = dict(row)
         conn.close()
         
         return filter_card_by_template(dict(row) if row else None)

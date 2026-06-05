@@ -70,7 +70,7 @@ def add_new_card(
             project_id=mapped_params.pop("project_id", project_id),
             template_type=mapped_params.pop("template_type", template_type),
             image_path=str(path),
-            **mapped_params
+            card_data=mapped_params
         )
 
         if result["error"] is not None:
