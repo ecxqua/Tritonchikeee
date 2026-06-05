@@ -739,6 +739,9 @@ class IdentificationService:
             "success": False,
             "error": None
         }
+        if not self.card_service.is_card_exist(card_id):
+            result["error"] = f"commit_card: Карточки {card_id} существует"
+            return result
         # Валидатор работает заранее
         if template_type and card_data:
             card_data = validate_template_fields(

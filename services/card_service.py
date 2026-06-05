@@ -576,10 +576,16 @@ class CardService:
         cursor = conn.cursor()
 
         if card_data:
-            fields = [f"{key} = ?" for key in card_data.keys()]
-            values = list(card_data.values()) + [card_id]
-            query = f"UPDATE cards SET {', '.join(fields)} WHERE card_id = ?"
-            cursor.execute(query, values)
+            # Проверяем, изменяем ли мы значение поля коммитом.
+            existing_card_data = self.get_card(card_id)
+            if not existing_card_data:
+                return False
+            card_data = {key: value for key, value in card_data.items() if value != existing_card_data[key]}
+            if card_data:
+                fields = [f"{key} = ?" for key in card_data.keys()]
+                values = list(card_data.values()) + [card_id]
+                query = f"UPDATE cards SET {', '.join(fields)} WHERE card_id = ?"
+                cursor.execute(query, values)
         # 2. Создаём коммит — снапшот состояния ПОСЛЕ обновления
         commit_id = str(uuid.uuid4())
         

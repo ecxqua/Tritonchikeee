@@ -6,7 +6,7 @@ import time
 
 # setup()
 service = create_identification_service()
-# service.refresh(confirm=True, remigrate=True)
+service.refresh(confirm=True, remigrate=True)
 print("Старт обработки")
 start_time = time.time()
 
