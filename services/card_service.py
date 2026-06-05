@@ -82,9 +82,11 @@ ALLOWED_COMMIT_FIELDS = {
 
 
 SPECIES_PREFIX = {
-    'Карелина': 'K',
-    'Гребенчатый': 'R',
-    'Ребристый': 'R'
+    'карелина': 'K',
+    'гребенчатый': 'R',
+    'ребристый': 'R',
+    'тритон карелина': 'К',
+    'ребристый': 'R'
 }
 
 # =============================================================================
@@ -193,7 +195,7 @@ def rename_photo(card_id: str, photo_path: str, suffix: str):
 
 def form_card_id(cursor, species_name: str):
     """Генерирует id карточки инкрементально, использует таблицу species."""
-    species_prefix = SPECIES_PREFIX.get(species_name, "X")
+    species_prefix = SPECIES_PREFIX.get(species_name.lower(), "X")
     cursor.execute(
         "SELECT count, last_num FROM species WHERE prefix = ?",
         (species_prefix)
