@@ -227,6 +227,122 @@ def get_embedding_from_array(
         return None
 
 
+def get_attention_heatmap(
+    crop_array: np.ndarray,
+    model: DinoEmbeddingNet,
+    transform,
+    device: torch.device,
+    output_path: str,
+) -> bool:
+    """
+    Generates an occlusion sensitivity heatmap for identification.
+
+    The image is covered by small patches one by one, then the embedding is
+    recomputed and compared to the original embedding. If hiding a patch makes
+    the embedding change a lot, that patch is important for recognition.
+    """
+    try:
+        import cv2
+        import matplotlib.pyplot as plt
+
+        if not isinstance(crop_array, np.ndarray) or crop_array.ndim != 3:
+            logger.error("Invalid array format for heatmap")
+            return False
+
+        orig_h, orig_w = crop_array.shape[:2]
+        crop_array_rgb = cv2.cvtColor(crop_array, cv2.COLOR_BGR2RGB)
+        image = Image.fromarray(crop_array_rgb)
+
+        if transform is None:
+            transform = DEFAULT_TRANSFORM
+
+        img_tensor = transform(image).unsqueeze(0).to(device)
+
+        with torch.no_grad():
+            original_embedding = model(img_tensor)
+
+        occlusion_size = 14
+        stride = 14
+        base_image = img_tensor.clone()
+        occlusion_scores = []
+        occlusion_positions = []
+        batch_images = []
+        batch_positions = []
+        batch_size = 32
+
+        def flush_batch(images, positions):
+            if not images:
+                return
+            batch = torch.cat(images, dim=0)
+            with torch.no_grad():
+                occluded_embeddings = model(batch)
+                similarities = F.cosine_similarity(
+                    occluded_embeddings,
+                    original_embedding.expand_as(occluded_embeddings),
+                    dim=1,
+                )
+                scores = (1.0 - similarities).detach().cpu().numpy()
+            occlusion_scores.extend(scores.tolist())
+            occlusion_positions.extend(positions)
+
+        for y in range(0, DEFAULT_IMAGE_SIZE, stride):
+            for x in range(0, DEFAULT_IMAGE_SIZE, stride):
+                occluded = base_image.clone()
+                y_end = min(y + occlusion_size, DEFAULT_IMAGE_SIZE)
+                x_end = min(x + occlusion_size, DEFAULT_IMAGE_SIZE)
+                occluded[:, :, y:y_end, x:x_end] = 0.0
+                batch_images.append(occluded)
+                batch_positions.append((x, y, x_end, y_end))
+
+                if len(batch_images) >= batch_size:
+                    flush_batch(batch_images, batch_positions)
+                    batch_images = []
+                    batch_positions = []
+
+        flush_batch(batch_images, batch_positions)
+
+        if not occlusion_scores:
+            logger.warning("No occlusion scores computed")
+            return False
+
+        heatmap_224 = np.zeros((DEFAULT_IMAGE_SIZE, DEFAULT_IMAGE_SIZE), dtype=np.float32)
+        coverage = np.zeros((DEFAULT_IMAGE_SIZE, DEFAULT_IMAGE_SIZE), dtype=np.float32)
+
+        for score, (x, y, x_end, y_end) in zip(occlusion_scores, occlusion_positions):
+            heatmap_224[y:y_end, x:x_end] += score
+            coverage[y:y_end, x:x_end] += 1.0
+
+        heatmap_224 = np.divide(
+            heatmap_224,
+            np.maximum(coverage, 1.0),
+            out=np.zeros_like(heatmap_224),
+            where=coverage > 0,
+        )
+        heatmap_224 = (heatmap_224 - heatmap_224.min()) / (heatmap_224.max() - heatmap_224.min() + 1e-8)
+        heatmap_224 = np.power(heatmap_224, 0.85)
+
+        heatmap = cv2.resize(heatmap_224, (orig_w, orig_h), interpolation=cv2.INTER_NEAREST)
+        heatmap = np.clip(heatmap, 0.0, 1.0)
+
+        # Save only the final overlay near the crop (no multi-panel collage).
+        fig, ax = plt.subplots(1, 1, figsize=(6, 6))
+        ax.imshow(crop_array_rgb, alpha=0.82)
+        ax.imshow(heatmap, cmap='plasma', alpha=0.38, vmin=0, vmax=1, interpolation='nearest')
+        ax.set_title("Where Model Focuses", fontsize=12, fontweight='bold')
+        ax.axis('off')
+
+        plt.tight_layout(pad=0.1)
+        Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+        plt.savefig(output_path, dpi=100, bbox_inches='tight')
+        plt.close(fig)
+
+        logger.info(f"Occlusion sensitivity heatmap saved: {output_path}")
+        return True
+    except Exception as e:
+        logger.error(f"Error generating heatmap: {e}", exc_info=True)
+        return False
+
+
 def search_vectors(
     query_embedding: np.ndarray,
     index_embeddings: np.ndarray,

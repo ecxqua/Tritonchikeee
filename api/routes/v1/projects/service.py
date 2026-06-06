@@ -16,7 +16,7 @@ def _resolve_project(
         "species": project["species_filter"],
         "territory": project["territory_filter"],
         "createdAt": project["created_at"],
-        "newtCount": len(cards.get_prototypes_by_project(project["id"]))
+        "newtCount": len(cards.get_cards_by_project(project["id"]))
     }
 
 
@@ -111,19 +111,14 @@ def get_project_newts(
         raise APIError(status=404, msg=f"No project with ID {id}")
 
     result: List[Dict[str, Any]] = []
-    for proto in id_service.card_service.get_prototypes_by_project(id):
-        cards = sorted(proto["cards"], key=lambda c: c["created_at"])
-
-        first = cards[0]
-        last = cards[-1]
-
+    for card in id_service.card_service.get_cards_by_project(id):
         result.append({
-            "id": proto.get("prototype_id", None),
-            "projectId": proto.get("project_id", None),
-            "cardType": last.get("template_type", None),
-            "createdAt": first.get("created_at", None),
-            "sex": first.get("sex", None),
-            "status": first.get("status", None)
+            "id": card.get("card_id", None),
+            "projectId": id,
+            "cardType": card.get("template_type", None),
+            "createdAt": card.get("created_at", None),
+            "sex": card.get("sex", None),
+            "status": card.get("status", None)
         })
 
     return sorted(result, key=lambda item: int(item["id"].split("-")[-1]))

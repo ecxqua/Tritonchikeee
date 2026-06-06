@@ -12,22 +12,17 @@ def get_newt_by_id(
     id: str,
     id_service: IdentificationService,
 ) -> Dict[str, Any]:
-    proto = id_service.card_service.get_prototype(id)
-    if not proto:
-        raise APIError(status=404, msg=f"No prototype by ID {id}")
-
-    cards = sorted(proto["cards"], key=lambda c: c["created_at"])
-
-    first = cards[0]
-    last = cards[-1]
+    card = id_service.card_service.get_card(id)
+    if not card:
+        raise APIError(status=404, msg=f"No card by ID {id}")
 
     return {
-        "id": proto["prototype_id"],
-        "projectId": proto["project_id"],
-        "cardType": last["template_type"],
-        "createdAt": first["created_at"],
-        "sex": first["sex"],
-        "status": first["status"]
+        "id": card.get("card_id", None),
+        "projectId": card.get("project_id", None),
+        "cardType": card.get("template_type", None),
+        "createdAt": card.get("created_at", None),
+        "sex": card.get("sex", None),
+        "status": card.get("status", None),
     }
 
 
@@ -35,13 +30,13 @@ def get_cards_by_newt_id(
     id: str,
     id_service: IdentificationService,
 ) -> List[Dict[str, Any]]:
-    proto = id_service.card_service.get_prototype(id)
-    if not proto:
-        raise APIError(status=404, msg=f"No prototype by ID {id}")
+    card0 = id_service.card_service.get_card(id)
+    if not card0:
+        raise APIError(status=404, msg=f"No card by ID {id}")
 
     result: List[Dict[str, Any]] = []
 
-    for card in proto["cards"]:
+    for card in [card0]:  # easier legacy comp
         photo_objs = id_service.card_service.get_card_photos(card["card_id"])
 
         photos: List[str] = []
@@ -69,6 +64,7 @@ def get_cards_by_newt_id(
         result.append({
             "cardType": card["template_type"],
             "data": {k: v for k, v in {
+		        "species": card.get("species", None),
                 "dateFilled": card.get("date", None),
                 "bodyLength": card.get("length_body", None),
                 "tailLength": card.get("length_tail", None),
@@ -103,14 +99,68 @@ def patch_card_by_newt_id(
     params: Dict[str, Any],
     id_service: IdentificationService,
 ) -> Dict[str, Any]:
-    proto = id_service.card_service.get_prototype_by_card_id(id)
-    if not proto:
-        raise APIError(status=404, msg=f"No prototype by ID {id}")
+    card = id_service.card_service.get_card(id)
+    if not card:
+        raise APIError(status=404, msg=f"No card by ID {id}")
 
-    card = sorted(proto["cards"], key=lambda c: c["created_at"])[0]
-    card_id = card["card_id"]
+    template_type = params["cardType"]
+    submission_id = id # f"{id}-{template_type.replace('-', '')}"
 
-    if not id_service.card_service._update_card(card_id, **params):
+    filtered_params = {
+	    key: value
+	    for key, value in params.items()
+	    if key not in card or card[key] != value or not value
+    }
+
+    for key in [  # cleanup & extract later
+	    "cardType", "photoNumber"
+    ]:
+        filtered_params.pop(key)
+
+    new_params = {
+	    k: v for k, v in {
+            "date": filtered_params.get("dateFilled", None),
+            "length_body": filtered_params.get("bodyLength", None),
+            "length_tail": filtered_params.get("tailLength", None),
+            "weight": filtered_params.get("weight", None),
+            "sex": filtered_params.get("sex", None),
+            "birth_year_exact": filtered_params.get("exactBirthDate", None),
+            "birth_year_approx": filtered_params.get("estimatedBirthDate", None),
+            "origin_region": filtered_params.get("regionOfOrigin", None),
+            "length_device": filtered_params.get("measurementDevice", None),
+            "weight_device": filtered_params.get("scaleBrand", None),
+            "notes": filtered_params.get("notes", None),
+            "release_date": filtered_params.get("releaseDate", None),
+            "parent_male_id": filtered_params.get("fatherId", None),
+            "parent_female_id": filtered_params.get("motherId", None),
+            "length_total": filtered_params.get("totalLength", None),
+            "water_body_name": filtered_params.get("waterBodyName", None),
+            "meeting_time": filtered_params.get("encounterTime", None),
+            "status": filtered_params.get("status", None),
+            "water_body_number": filtered_params.get("waterBodyNumber", None),
+	        "species": filtered_params.get("species", None),
+	    }.items() if v
+    }
+    print(f"{new_params=}")
+
+    if not id_service.commit_card(
+        submission_id,
+        card_data=new_params
+    ):
         raise APIError(status=500, msg="Something went wrong")
+
+    return {}
+
+
+def delete_card(
+    newt_id: str,
+    card_type: str,
+    id_service: IdentificationService,
+) -> Dict[str, Any]:
+    card_id = f"{newt_id}"
+    result = id_service.delete_card(card_id, True, True)
+
+    if result['error'] is not None:
+        raise APIError(status=400, msg=result['error'])
 
     return {}

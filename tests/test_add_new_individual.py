@@ -5,14 +5,14 @@ import time
 # 1. Инициализация
 service = create_identification_service()
 
-print(service.add_encounter(
-    prototype_id="NT-K-1",
+card_id = service.add_new_individual(
+    project_id=1,
     template_type="ИК-1",
     species="Карелина",
     image_path="data/input/image.png",
-    project_id=1,
-    **{
+    card_data={
+        'length_body': 50,
         'weight': 3.22,
         'sex': 'М',
     }
-))
+)["card_id"]

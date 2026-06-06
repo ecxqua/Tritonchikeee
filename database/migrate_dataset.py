@@ -20,13 +20,13 @@ DB_PATH = Path("database/cards.db")
 DATASET_PATH = Path("data/dataset_crop/dataset_crop_24_new")
 
 SPECIES_CONFIG = {
-    "karelin": {
+    "K": {
         "species_name": "Карелина",
         "prefix": "K",
         "folder": DATASET_PATH / "karelin"
     },
-    "ribbed": {
-        "species_name": "Гребенчатый",
+    "R": {
+        "species_name": "Ребристый",
         "prefix": "R",
         "folder": DATASET_PATH / "ribbed"
     }
@@ -83,6 +83,7 @@ def create_individual(cursor, card_id: str, species: str, project_id: int, templ
         VALUES (?, ?, ?, ?, ?)
     ''', (card_id, template_type, species, project_id, datetime.now()))
 
+
 def create_photo(cursor, card_id: str, photo_path: Path, photo_number: str, is_main: bool = False, is_legacy: bool = True) -> int:
     """Создать запись о фотографии."""
     cursor.execute('''
@@ -100,6 +101,30 @@ def create_photo(cursor, card_id: str, photo_path: Path, photo_number: str, is_m
         0
     ))
     return cursor.lastrowid
+
+def form_card_id(cursor, species_prefix: str):
+    cursor.execute(
+        "SELECT count, last_num FROM species WHERE prefix = ?",
+        (species_prefix)
+    )
+    species_data = cursor.fetchone()
+    if species_data:
+        count = species_data[0] + 1
+        animal_num = species_data[1] + 1
+        cursor.execute('''
+            UPDATE species
+            SET count = ?, last_num = ?
+            WHERE prefix = ?
+        ''', (count, animal_num, species_prefix))
+        return f"NT-{species_prefix}-{animal_num}"
+    else:
+        cursor.execute('''
+            INSERT OR IGNORE INTO species
+            (prefix, name, count, last_num)
+            VALUES (?, ?, ?, ?)
+        ''', (species_prefix, SPECIES_CONFIG[species_prefix]["species_name"], 1, 1))
+        return f"NT-{species_prefix}-1"
+
 
 def migrate_dataset() -> dict:
     """Основная функция миграции."""
@@ -137,17 +162,19 @@ def migrate_dataset() -> dict:
             print(f"⚠️ Папка не найдена: {species_folder}")
             continue
         
-        individual_folders = sorted([
-            f for f in species_folder.iterdir()
-            if f.is_dir() and f.name.isdigit()
-        ])
+        individual_folders = sorted(
+            [
+                f for f in species_folder.iterdir()
+                if f.is_dir() and f.name.isdigit()
+            ],
+            key=lambda f: int(f.name),
+        )
         
         print(f"   Найдено особей: {len(individual_folders)}")
         
         for individual_folder in individual_folders:
-            # Формирование ID: NT-K-1-ИК1
-            animal_num = individual_folder.name
-            card_id = f"NT-{species_prefix}-{animal_num}-{DEFAULT_TEMPLATE.replace('-', '')}"
+            # Формирование ID: NT-K-1
+            card_id = form_card_id(cursor, species_prefix)
             
             # ✅ Проверяем наличие карточки, но НЕ пропускаем фото, если она уже есть
             card_exists = individual_exists(cursor, card_id)
@@ -168,6 +195,9 @@ def migrate_dataset() -> dict:
             photos = sorted(individual_folder.glob("*.jpg"))
             if not photos: photos = sorted(individual_folder.glob("*.jpeg"))
             if not photos: photos = sorted(individual_folder.glob("*.png"))
+            if not photos: photos = sorted(individual_folder.glob("*.JPG"))
+            if not photos: photos = sorted(individual_folder.glob("*.JPEG"))
+            if not photos: photos = sorted(individual_folder.glob("*.PNG"))
             
             print(f"      Найдено фото: {len(photos)}")
             

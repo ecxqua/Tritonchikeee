@@ -88,6 +88,7 @@ def init_database():
             card_id TEXT,
             photo_type TEXT,
             photo_number TEXT,
+            photo_group TEXT,
             photo_path TEXT,
             date_taken TEXT,
             time_taken TEXT,
@@ -107,13 +108,84 @@ def init_database():
         CREATE TABLE IF NOT EXISTS uploads (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             project_id INTEGER NOT NULL,
-            file_path TEXT NOT NULL,
+            crop_path TEXT NOT NULL,
+            full_path TEXT,
+            heatmap_path TEXT,
             embedding TEXT NOT NULL,
             status TEXT DEFAULT 'pending',
             card_id TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             expires_at TIMESTAMP NOT NULL,
             FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
+        )
+    ''')
+
+    # -------------------------------------------------------------------------
+    # ТАБЛИЦА 5: commits (история изменений карты) — FK card_id
+    # -------------------------------------------------------------------------
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS commits (
+            commit_id TEXT PRIMARY KEY,
+            card_id TEXT,
+            species TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            date TEXT,
+            notes TEXT,
+            length_body REAL,
+            length_tail REAL,
+            length_total REAL,
+            weight REAL,
+            sex TEXT,
+            birth_year_exact TEXT,
+            birth_year_approx TEXT,
+            origin_region TEXT,
+            length_device TEXT,
+            weight_device TEXT,
+            parent_male_id TEXT,
+            parent_female_id TEXT,
+            release_date TEXT,
+            water_body_name TEXT,
+            meeting_time TEXT,
+            status TEXT,
+            water_body_number TEXT,
+            FOREIGN KEY(card_id) REFERENCES cards(card_id),
+            FOREIGN KEY(parent_male_id) REFERENCES cards(card_id),
+            FOREIGN KEY(parent_female_id) REFERENCES cards(card_id)
+        )
+    ''')
+
+    # -------------------------------------------------------------------------
+    # ТАБЛИЦА 6: commits_photos (many-to-many) связь для коммитов и добавленных фото.
+    # -------------------------------------------------------------------------
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS commits_photos (
+            commit_id TEXT,
+            photo_id INTEGER,
+            PRIMARY KEY (commit_id, photo_id),
+            FOREIGN KEY(commit_id) REFERENCES commits(commit_id),
+            FOREIGN KEY(photo_id) REFERENCES photos(photo_id)
+        )
+    ''')
+
+    # -------------------------------------------------------------------------
+    # ТАБЛИЦА 7: species
+    # -------------------------------------------------------------------------
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS species (
+            prefix TEXT PRIMARY KEY,
+            name TEXT,
+            count INTEGER,
+            last_num INTEGER
+        )
+    ''')
+
+    # -------------------------------------------------------------------------
+    # ТАБЛИЦА 7: stats (Полезная статистика)
+    # -------------------------------------------------------------------------
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS stats (
+            name TEXT PRIMARY KEY,
+            value INTEGER
         )
     ''')
     

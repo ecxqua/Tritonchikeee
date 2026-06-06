@@ -16,10 +16,10 @@ router = APIRouter()
 @router.post("/projects")
 async def create_project(
     response: Response,
-    name: str = Form(...),
-    description: str = Form(...),
-    species: List[str] | None = Form(None),
-    territory: List[str] | None = Form(None),
+    name: str = Body(...),
+    description: str = Body(...),
+    species: List[str] | None = Body(None),
+    territory: List[str] | None = Body(None),
     id_service: IdentificationService = Depends(get_id_service),
 ):
     try:

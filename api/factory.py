@@ -4,12 +4,15 @@ from contextlib import asynccontextmanager
 
 from api.routes import router
 from api.services.temp import TempStorage
-from services.identification_service import create_identification_service
+from services.identification_service import create_identification_service, \
+    setup
 
 
 @asynccontextmanager
 async def lifespan(api: FastAPI):
+    setup(migrate=True)
     service = create_identification_service()
+    # service.refresh_reid_count()
 
     temp = TempStorage()
 

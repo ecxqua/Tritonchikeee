@@ -70,7 +70,9 @@ class UploadService:
             CREATE TABLE IF NOT EXISTS uploads (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 project_id INTEGER NOT NULL,
-                file_path TEXT NOT NULL,
+                crop_path TEXT NOT NULL,
+                full_path TEXT,
+                heatmap_path TEXT,
                 embedding TEXT NOT NULL,
                 status TEXT DEFAULT 'pending',
                 card_id TEXT,
@@ -96,9 +98,11 @@ class UploadService:
     
     def create_upload(
         self,
-        file_path: str,
+        crop_path: str,
+        full_path: str,
         embedding: Any,
-        expiry_hours: int = UPLOAD_EXPIRY_HOURS
+        expiry_hours: int = UPLOAD_EXPIRY_HOURS,
+        heatmap_path: str | None = None
     ) -> int:
         """CREATE: Создать временную загрузку."""
         if embedding is None or len(embedding) == 0:
@@ -110,21 +114,12 @@ class UploadService:
         now = datetime.now()
         expires_at = now + timedelta(hours=expiry_hours)
         embedding_json = serialize_embedding(embedding)
-
-        # Смена под upload_id
-        upload_id = self.get_stats()["total"] + 1
-        file_suffix = Path(file_path).suffix
-        file_parent = str(Path(file_path).parent)
-        logger.info("Родительская папка сохранённого кропа: " + file_parent)
-        file_path = str(Path(file_path).rename(
-            f"{file_parent}\\{upload_id}{file_suffix}"
-        ))
         
         try:
             cursor.execute('''
-                INSERT INTO uploads (project_id, file_path, embedding, status, created_at, expires_at)
-                VALUES (?, ?, ?, 'pending', ?, ?)
-            ''', (-1, file_path, embedding_json, now.isoformat(), expires_at.isoformat()))
+                INSERT INTO uploads (project_id, crop_path, full_path, heatmap_path, embedding, status, created_at, expires_at)
+                VALUES (?, ?, ?, ?, ?, 'pending', ?, ?)
+            ''', (-1, crop_path, full_path, heatmap_path, embedding_json, now.isoformat(), expires_at.isoformat()))
             
             upload_id = cursor.lastrowid
             conn.commit()
@@ -144,7 +139,7 @@ class UploadService:
         cursor = conn.cursor()
         
         cursor.execute('''
-            SELECT id, project_id, file_path, embedding, status, card_id, created_at, expires_at
+            SELECT id, project_id, crop_path, full_path, heatmap_path, embedding, status, card_id, created_at, expires_at
             FROM uploads
             WHERE id = ?
         ''', (upload_id,))
@@ -229,13 +224,13 @@ class UploadService:
             cond = ""
             if expired:
                 cond = '''
-                    SELECT id, file_path FROM uploads
+                    SELECT id, crop_path, full_path, heatmap_path FROM uploads
                     WHERE status = 'pending' AND expires_at < ?
                 '''
                 cursor.execute(cond, (now,))
             else:
                 cond = '''
-                    SELECT id, file_path FROM uploads
+                    SELECT id, crop_path, full_path, heatmap_path FROM uploads
                 '''
                 cursor.execute(cond)
             
@@ -246,15 +241,16 @@ class UploadService:
             
             # 2. Удаляем файлы с диска
             deleted_files = 0
-            for upload_id, file_path in expired_uploads:
-                try:
-                    if delete_file(file_path):
-                        deleted_files += 1
-                        logger.debug(f"Файл удалён: {file_path}")
-                    else:
-                        logger.warning(f"Файл не найден или не удалён: {file_path}")
-                except Exception as e:
-                    logger.error(f"Ошибка при удалении файла {file_path}: {e}")
+            for upload_id, crop_path, full_path, heatmap_path in expired_uploads:
+                for file_path in (crop_path, full_path, heatmap_path):
+                    try:
+                        if delete_file(file_path):
+                            deleted_files += 1
+                            logger.debug(f"Файл удалён: {file_path}")
+                        else:
+                            logger.warning(f"Файл не найден или не удалён: {file_path}")
+                    except Exception as e:
+                        logger.error(f"Ошибка при удалении файла {file_path}: {e}")
                     # Не прерываем очистку — продолжаем с остальными
             
             # 3. Удаляем записи из БД
@@ -291,14 +287,14 @@ class UploadService:
         
         if project_id:
             cursor.execute('''
-                SELECT id, project_id, file_path, embedding, status, created_at, expires_at
+                SELECT id, project_id, crop_path, full_path, heatmap_path, embedding, status, created_at, expires_at
                 FROM uploads
                 WHERE status = 'pending' AND project_id = ?
                 ORDER BY created_at DESC
             ''', (project_id,))
         else:
             cursor.execute('''
-                SELECT id, project_id, file_path, embedding, status, created_at, expires_at
+                SELECT id, project_id, crop_path, full_path, heatmap_path, embedding, status, created_at, expires_at
                 FROM uploads
                 WHERE status = 'pending'
                 ORDER BY created_at DESC

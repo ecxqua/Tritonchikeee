@@ -18,7 +18,7 @@ def _build_match(
     match: Dict[str, Any],
     id_service: IdentificationService,
 ) -> Dict[str, Any]:
-    id: str = match["prototype_id"]
+    id: str = match["card_id"]
     similarity: float = match["similarity_percent"]
 
     result: dict[str, Any] = {
@@ -27,7 +27,7 @@ def _build_match(
         "photoUrl": "unknown"
     }
 
-    photos = id_service.card_service.get_prototype_photos(id)
+    photos = id_service.card_service.get_card_photos(id)
     if photos:
         path = photos[0]["photo_path"]
         photo_base64 = None
@@ -50,17 +50,25 @@ def _build_match(
 
 def complete_recognize(
     file_data: FileData,
-    scope: str,
+    scope: str | None,
     project_id: int | None,
+    top_k: int | None,
     id_service: IdentificationService,
     temp: TempStorage
 ) -> Dict[str, Any]:
-    if scope not in _allowed_scopes:
+    if scope is not None and scope not in _allowed_scopes:
         raise APIError(status=400, msg=f"Incorrect scope {scope}")
 
-    if project_id is not None and \
-            id_service.project_service.get_project_by_id(project_id) is None:
-        raise APIError(status=400, msg=f"Unknown project ID {project_id}")
+    territories = None
+    species = None
+
+    if project_id is not None:
+        project = id_service.project_service.get_project_by_id(project_id)
+        if not project:
+            raise APIError(status=404, msg=f"Unknown project {project_id}")
+
+        territories = project.get('territories_filter', None)
+        species = project.get('species_filter', None)
 
     path = temp.write_temp_file(
         path=temp.make_temp_file_name(
@@ -70,15 +78,23 @@ def complete_recognize(
         data=file_data.data
     )
 
-    # TODO add filters later
-    # with scope and projectId
+    k = top_k if top_k is not None else 5
+    try:
+        k = int(k)
+    except (ValueError, TypeError):
+        k = 5
+    
+    k = max(1, min(k, 100))
 
     try:
         res = id_service.identify_and_prepare(
             image_path=str(path),
-            project_ids=[1],
-            top_k=5,
-            debug=True
+            project_ids=[project_id] if project_id else None,
+            territory=territories,
+            species=species,
+            top_k=k,
+            debug=True,
+            heatmap=True
         )
 
         error = res["error"]
@@ -86,12 +102,17 @@ def complete_recognize(
             return {"status": "not_found"}
             # raise APIError(status=500, msg=error)
 
+        with open(res["heatmap_path"], 'rb') as heatmap_file:
+            heatmap_b64 = base64.b64encode(heatmap_file.read()).decode("utf-8")
+            heatmap_b64 = f"data:image/png;base64,{heatmap_b64}"
+
         return {
             "status": "found",
             "matches": [
                 _build_match(match, id_service)
                 for match in res["candidates"]
-            ]
+            ],
+            "heatmap": heatmap_b64
         }
     except ValueError:
         # raise APIError(status=400, msg=str(ex))
