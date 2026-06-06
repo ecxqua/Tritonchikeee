@@ -157,7 +157,7 @@ def delete_card(
     card_type: str,
     id_service: IdentificationService,
 ) -> Dict[str, Any]:
-    card_id = f"{newt_id}-{card_type.replace('-', '')}"
+    card_id = f"{newt_id}"
     result = id_service.delete_card(card_id, True, True)
 
     if result['error'] is not None:
