@@ -708,7 +708,7 @@ class CardService:
         if not card_data:
             result['error'] = f"Особь {card_id} не найдена в базе."
             return result
-        species_prefix = SPECIES_PREFIX[card_data["species"]]
+        species_prefix = SPECIES_PREFIX[card_data["species"].lower()]
 
         conn = get_db_connection(self.db_path)
         cursor = conn.cursor()
