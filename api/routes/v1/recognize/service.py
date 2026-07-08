@@ -10,7 +10,7 @@ from typing import Any, Dict
 import base64
 import mimetypes
 
-
+HEATMAP = False
 _allowed_scopes = {"all", "by_species", "by_territory"}
 
 
@@ -94,7 +94,7 @@ def complete_recognize(
             species=species,
             top_k=k,
             debug=True,
-            heatmap=True
+            heatmap=HEATMAP
         )
 
         error = res["error"]
@@ -102,9 +102,11 @@ def complete_recognize(
             return {"status": "not_found"}
             # raise APIError(status=500, msg=error)
 
-        with open(res["heatmap_path"], 'rb') as heatmap_file:
-            heatmap_b64 = base64.b64encode(heatmap_file.read()).decode("utf-8")
-            heatmap_b64 = f"data:image/png;base64,{heatmap_b64}"
+        heatmap_b64 = None
+        if HEATMAP:
+            with open(res["heatmap_path"], 'rb') as heatmap_file:
+                heatmap_b64 = base64.b64encode(heatmap_file.read()).decode("utf-8")
+                heatmap_b64 = f"data:image/png;base64,{heatmap_b64}"
 
         return {
             "status": "found",
